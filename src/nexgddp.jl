@@ -165,9 +165,9 @@ each SSP scenario on one set of axes, every scenario drawn as a median line with
 a shaded spread band, out to 2100.
 
 ```julia
-plt = climate_ssp("Berlin, Germany"; threshold = 30,
+fig = climate_ssp("Berlin, Germany"; threshold = 30,
                   scenarios = (:ssp126, :ssp245, :ssp585))
-savefig(plt, "berlin_hot_days_ssp.png")
+save("berlin_hot_days_ssp.png", fig)
 ```
 
 Keyword arguments mirror [`climate_projection`](@ref), plus `scenarios` (the SSPs
@@ -188,8 +188,7 @@ function climate_ssp(place::AbstractString;
                      proj_start::Date = Date(1950, 1, 1),
                      proj_stop::Date = Date(2100, 12, 31),
                      vars = index === nothing ? (var,) : keys(NEXGDDP_VARMAP),
-                     band::Bool = true,
-                     kwargs...)
+                     band::Bool = true)
     loc  = geocode(place)
     hist = era5_daily(loc; start = hist_start, stop = hist_stop)
     indexfn = index === nothing ? (d -> days_above(d, threshold; var = var)) : index
@@ -198,20 +197,20 @@ function climate_ssp(place::AbstractString;
 
     place_lbl = isempty(loc.country) ? loc.name : "$(loc.name), $(loc.country)"
     title = index === nothing ?
-        @sprintf("%s — days/yr with %s > %g°C\nERA5 + NEX-GDDP-CMIP6 by SSP",
+        @sprintf("%s — days/yr with %s > %g°C  ·  ERA5 + NEX-GDDP-CMIP6 by SSP",
                  place_lbl, string(var), float(threshold)) :
-        "$(place_lbl)\nERA5 + NEX-GDDP-CMIP6 by SSP"
+        "$(place_lbl)  ·  ERA5 + NEX-GDDP-CMIP6 by SSP"
     ylabel = index === nothing ? "days per year" : string(vc)
 
-    plt = plot_index(hist_idx; valuecol = vc, label = "ERA5", title = title,
-                     ylabel = ylabel, trend = false, color = 1, kwargs...)
+    fig, ax = _figure_with_history(hist_idx, vc; title = title, ylabel = ylabel)
     for (k, scen) in enumerate(scenarios)
         ens = ssp_ensemble(loc; scenario = scen, models = models,
                            start = proj_start, stop = proj_stop, vars = vars)
         correct && (ens = bias_correct(ens, hist; method = method, ref = ref))
         summary = ensemble_index(ens, indexfn; valuecol = vc)
-        plot_ensemble!(plt, summary; label = scenario_label(scen),
+        plot_ensemble!(ax, summary; label = scenario_label(scen),
                        band = band, color = k + 1)
     end
-    return plt
+    axislegend(ax; position = :lt)
+    return fig
 end

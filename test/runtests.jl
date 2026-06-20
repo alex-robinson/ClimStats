@@ -3,7 +3,7 @@ using ClimStats: _build_table, _tofloat, _daily_param, DAILY_VARMAP
 using DataFrames
 using Dates
 using JSON3
-using Plots
+using CairoMakie
 using Statistics
 using Test
 using ClimStats: _eprob, _quantile_sorted,
@@ -100,11 +100,12 @@ end
 
 @testset "plotting (smoke)" begin
     d = synthetic_data()
-    plt = plot_index(days_above(d, 30); title = "test")
-    @test plt isa Plots.Plot
-    plt2 = plot_index!(plt, annual_mean(d; var = :tmean); valuecol = :mean,
+    fig = plot_index(days_above(d, 30); title = "test")
+    @test fig isa Figure
+    fig2 = plot_index!(fig, annual_mean(d; var = :tmean); valuecol = :mean,
                        label = "mean T")
-    @test plt2 isa Plots.Plot
+    @test fig2 isa Figure
+    @test ClimStats._axis(fig) isa Axis        # mutating helpers find the axis
 end
 
 # Build a dataset over an arbitrary span with a known temperature offset and
@@ -218,8 +219,8 @@ end
 
     @test bias_correct(ens, m1).members[1].source == "A (bias-corrected)"
 
-    plt = plot_index(days_above(m1, 30); label = "A")
-    @test plot_ensemble!(plt, summ; label = "ens") isa Plots.Plot
+    fig = plot_index(days_above(m1, 30); label = "A")
+    @test plot_ensemble!(fig, summ; label = "ens") isa Figure
 end
 
 @testset "NEX-GDDP / SSP logic" begin

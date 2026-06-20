@@ -23,8 +23,8 @@ println()
 
 # 2. The headline SSP figure: ERA5 history + a bias-corrected NEX-GDDP ensemble
 #    for three scenarios, each a median line with a shaded spread band, to 2100.
-plt = climate_ssp("Berlin, Germany"; threshold = 30,
+fig = climate_ssp("Berlin, Germany"; threshold = 30,
                   scenarios = (:ssp126, :ssp245, :ssp585),
                   models = NEXGDDP_DEFAULT_MODELS)
-savefig(plt, joinpath(@__DIR__, "berlin_hot_days_ssp.png"))
+save(joinpath(@__DIR__, "berlin_hot_days_ssp.png"), fig)
 println("Saved SSP figure -> ", joinpath(@__DIR__, "berlin_hot_days_ssp.png"))

@@ -11,11 +11,15 @@ data *and* a figure — e.g. a time series of the number of days per year above
 ```julia
 using ClimStats
 
-plt = climate_timeseries("Berlin, Germany"; threshold = 30)
-savefig(plt, "berlin_hot_days.png")
+fig = climate_timeseries("Berlin, Germany"; threshold = 30)
+save("berlin_hot_days.png", fig)        # `save` is re-exported from CairoMakie
 ```
 
 ![example](examples/berlin_hot_days.png)
+
+Figures are built with [Makie](https://docs.makie.org) via the CairoMakie
+backend. `using ClimStats` activates it and re-exports `save`, so the line above
+works as-is; load `GLMakie` yourself if you want interactive windows instead.
 
 ## Installation
 
@@ -26,7 +30,7 @@ Pkg.develop(path = ".")   # from a clone of this repo
 # Pkg.add(url = "https://github.com/alex-robinson/climstats")
 ```
 
-Then `instantiate` to pull the dependencies (DataFrames, HTTP, JSON3, Plots):
+Then `instantiate` to pull the dependencies (DataFrames, HTTP, JSON3, CairoMakie):
 
 ```julia
 Pkg.activate(".")
@@ -111,8 +115,8 @@ bias-corrects each model against the ERA5 baseline, and draws the index for both
 on one set of axes — the ensemble as a median line with a shaded spread band:
 
 ```julia
-plt = climate_projection("Berlin, Germany"; threshold = 30)
-savefig(plt, "berlin_hot_days_projection.png")
+fig = climate_projection("Berlin, Germany"; threshold = 30)
+save("berlin_hot_days_projection.png", fig)
 ```
 
 ![projection](examples/berlin_hot_days_projection.png)
@@ -131,8 +135,8 @@ ens = bias_correct(ens, hist)                         # per-month delta correcti
 # 3. Summarise the spread of any index across the ensemble.
 summary = ensemble_index(ens, d -> days_above(d, 30)) # year, lo, median, hi, mean, n
 
-plt = plot_index(days_above(hist, 30); label = "ERA5", trend = false)
-plot_ensemble!(plt, summary; label = "CMIP6 (bias-corr.)")
+fig = plot_index(days_above(hist, 30); label = "ERA5", trend = false)
+plot_ensemble!(fig, summary; label = "CMIP6 (bias-corr.)")
 ```
 
 Any index works in `climate_projection` via the `index` keyword, e.g. mean
@@ -184,9 +188,9 @@ using NCDatasets        # enables the NEX-GDDP backend
 data = nexgddp_daily("Berlin, Germany"; model = "MPI-ESM1-2-HR", scenario = :ssp585)
 
 # The headline SSP figure: ERA5 history + a bias-corrected ensemble per scenario.
-plt = climate_ssp("Berlin, Germany"; threshold = 30,
+fig = climate_ssp("Berlin, Germany"; threshold = 30,
                   scenarios = (:ssp126, :ssp245, :ssp585))
-savefig(plt, "berlin_hot_days_ssp.png")
+save("berlin_hot_days_ssp.png", fig)
 ```
 
 `nexgddp_daily` returns the same [`ClimateData`](#) shape as `era5_daily`, so

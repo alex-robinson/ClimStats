@@ -8,9 +8,9 @@ using ClimStats
 using Dates
 
 # 1. The one-liner the package is built around.
-plt = climate_timeseries("Berlin, Germany"; threshold = 30,
+fig = climate_timeseries("Berlin, Germany"; threshold = 30,
                          start = Date(1950, 1, 1))
-savefig(plt, joinpath(@__DIR__, "berlin_hot_days.png"))
+save(joinpath(@__DIR__, "berlin_hot_days.png"), fig)
 println("Saved figure -> ", joinpath(@__DIR__, "berlin_hot_days.png"))
 
 # 2. The same download reused for several indices.
@@ -37,6 +37,6 @@ println("Mean-temperature trend: ", round(10 * tr.slope; digits = 2), " °C / de
 #    ensemble (median line + shaded spread), out to 2050.
 proj = climate_projection("Berlin, Germany"; threshold = 30,
                           hist_start = Date(1950, 1, 1))
-savefig(proj, joinpath(@__DIR__, "berlin_hot_days_projection.png"))
+save(joinpath(@__DIR__, "berlin_hot_days_projection.png"), proj)
 println("Saved projection figure -> ",
         joinpath(@__DIR__, "berlin_hot_days_projection.png"))

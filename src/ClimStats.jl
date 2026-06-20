@@ -10,8 +10,8 @@ Quick start
 using ClimStats
 
 # One-liner: location string in, figure out.
-plt = climate_timeseries("Berlin, Germany"; threshold = 30)
-savefig(plt, "berlin_hot_days.png")
+fig = climate_timeseries("Berlin, Germany"; threshold = 30)
+save("berlin_hot_days.png", fig)   # `save` re-exported from CairoMakie
 
 # Or step by step, to compute many things from the same download.
 data   = era5_daily("Berlin, Germany")     # daily tmax/tmin/tmean/precip
@@ -35,7 +35,7 @@ using Statistics
 using DataFrames
 using HTTP
 using JSON3
-using Plots
+using CairoMakie
 
 export Location, ClimateData, geocode, table, variables
 export era5_daily, projection_daily, default_stop, PROJECTION_MODELS
@@ -45,6 +45,7 @@ export BiasCorrection, QuantileCorrection, AbstractBiasCorrection
 export fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
 export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
 export plot_index, plot_index!, plot_ensemble!, climate_timeseries, climate_projection
+export save  # re-exported from CairoMakie, so `using ClimStats` is enough to save figures
 export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
 export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp
 
