@@ -32,3 +32,11 @@ end
 warming = annual_mean(data; var = :tmean)
 tr = linear_trend(warming.year, warming.mean)
 println("Mean-temperature trend: ", round(10 * tr.slope; digits = 2), " °C / decade")
+
+# 4. Past + future on one figure: ERA5 history plus a bias-corrected CMIP6
+#    ensemble (median line + shaded spread), out to 2050.
+proj = climate_projection("Berlin, Germany"; threshold = 30,
+                          hist_start = Date(1950, 1, 1))
+savefig(proj, joinpath(@__DIR__, "berlin_hot_days_projection.png"))
+println("Saved projection figure -> ",
+        joinpath(@__DIR__, "berlin_hot_days_projection.png"))

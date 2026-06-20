@@ -103,23 +103,58 @@ provider layer is deliberately thin and isolated (`src/providers.jl`): a future
 CDS-backed downloader only has to return a `ClimateData` using the same column
 convention, and every index/plot helper keeps working unchanged.
 
-## Projections (next step)
+## Projections: past + future on one figure
 
-The groundwork is already in place. `projection_daily` pulls CMIP6 daily data
-(1950–2050) with the *same* return type as `era5_daily`, so the same indices and
-plots apply. You can already overlay history and a projection:
+The projections step is implemented. `climate_projection` geocodes the place,
+downloads ERA5 history *and* a multi-model CMIP6 ensemble (to 2050),
+bias-corrects each model against the ERA5 baseline, and draws the index for both
+on one set of axes — the ensemble as a median line with a shaded spread band:
+
+```julia
+plt = climate_projection("Berlin, Germany"; threshold = 30)
+savefig(plt, "berlin_hot_days_projection.png")
+```
+
+![projection](examples/berlin_hot_days_projection.png)
+
+It composes from three reusable pieces, so you can drive each stage yourself:
 
 ```julia
 hist = era5_daily("Berlin, Germany")
-proj = projection_daily("Berlin, Germany"; model = "MRI_AGCM3_2_S")
 
-plt = plot_index(days_above(hist, 30); label = "ERA5")
-plot_index!(plt, days_above(proj, 30); label = "MRI_AGCM3_2_S")
+# 1. Multi-model ensemble (one member per model, failures skipped with a warning).
+ens = projection_ensemble("Berlin, Germany")          # -> Ensemble
+
+# 2. Bias-correct every member against the ERA5 baseline (1991–2020 by default).
+ens = bias_correct(ens, hist)                         # per-month delta correction
+
+# 3. Summarise the spread of any index across the ensemble.
+summary = ensemble_index(ens, d -> days_above(d, 30)) # year, lo, median, hi, mean, n
+
+plt = plot_index(days_above(hist, 30); label = "ERA5", trend = false)
+plot_ensemble!(plt, summary; label = "CMIP6 (bias-corr.)")
 ```
 
-Planned refinements for the projections step: multi-model ensembles with spread,
-bias-adjustment against the ERA5 baseline, and scenario (SSP) selection. See
-`PROJECTION_MODELS` for the models currently available.
+Any index works in `climate_projection` via the `index` keyword, e.g. mean
+warming instead of hot-day counts:
+
+```julia
+climate_projection("Berlin, Germany"; index = d -> annual_mean(d; var = :tmean))
+```
+
+### How the bias correction works
+
+Models carry systematic biases relative to reanalysis, so raw model values can't
+feed absolute-threshold indices directly. ClimStats corrects each model towards
+ERA5 over a reference period (default the 1991–2020 WMO normal) using a
+per-calendar-month delta — **additive** for temperatures, **multiplicative** for
+precipitation (`fit_bias_correction` / `apply_bias_correction` / `bias_correct`).
+This removes the model's mean seasonal bias while preserving its climate-change
+signal. A distribution-based method (quantile mapping) is the natural next
+refinement; the `BiasCorrection` type is general enough to host one.
+
+Planned further refinements: scenario (SSP) selection and quantile-mapping bias
+correction. See `PROJECTION_MODELS` for the models currently available.
 
 ## Project layout
 
@@ -129,7 +164,9 @@ src/
   types.jl       # Location, ClimateData
   providers.jl   # geocode + era5_daily + projection_daily (Open-Meteo)
   indices.jl     # days_above/below, annual_mean/sum, named indices, trend
-  plotting.jl    # plot_index, plot_index!, climate_timeseries
+  bias.jl        # bias correction against the ERA5 baseline
+  ensemble.jl    # multi-model ensembles + spread summaries
+  plotting.jl    # plot_index, plot_ensemble!, climate_timeseries/projection
 examples/
   berlin.jl      # the headline example end-to-end
 test/
@@ -153,5 +190,7 @@ CLIMSTATS_NETWORK_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
 
 ## Status
 
-Early days (`v0.1`). The ERA5 retrieval + indices + plotting path is complete;
-projections are scaffolded and are the next milestone.
+Early days (`v0.1`). The ERA5 retrieval, indices, and plotting path is complete,
+and so is the projections step: multi-model CMIP6 ensembles, bias adjustment
+against ERA5, and combined past+future figures. Next up: SSP scenario selection
+and quantile-mapping bias correction.

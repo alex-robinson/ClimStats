@@ -39,11 +39,15 @@ export Location, ClimateData, geocode, table, variables
 export era5_daily, projection_daily, default_stop, PROJECTION_MODELS
 export annual_count, days_above, days_below, annual_mean, annual_sum, linear_trend
 export hot_days, summer_days, frost_days, icing_days, tropical_nights, wet_days
-export plot_index, plot_index!, climate_timeseries
+export BiasCorrection, fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
+export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
+export plot_index, plot_index!, plot_ensemble!, climate_timeseries, climate_projection
 
 include("types.jl")
 include("providers.jl")
 include("indices.jl")
+include("bias.jl")
+include("ensemble.jl")
 include("plotting.jl")
 
 end # module ClimStats

@@ -104,6 +104,61 @@ end
     @test plt2 isa Plots.Plot
 end
 
+# Build a dataset over an arbitrary span with a known temperature offset and
+# precipitation scaling, so bias correction has an exact answer to recover.
+function make_data(years; toffset = 0.0, pscale = 1.0, source = "ERA5")
+    dates = Date(first(years), 1, 1):Day(1):Date(last(years), 12, 31)
+    doy = Dates.dayofyear.(dates)
+    tmax = 12 .+ 20 .* sin.(2π .* (doy .- 80) ./ 365) .+ toffset
+    df = DataFrame(date = collect(dates),
+                   tmax = Vector{Union{Missing,Float64}}(tmax),
+                   tmin = Vector{Union{Missing,Float64}}(tmax .- 8),
+                   tmean = Vector{Union{Missing,Float64}}(tmax .- 4),
+                   precip = Vector{Union{Missing,Float64}}(fill(2.0 * pscale, length(dates))))
+    ClimateData(Location("T", "N", 0.0, 0.0, 0.0), source, df)
+end
+
+@testset "bias correction" begin
+    ref = (Date(2000, 1, 1), Date(2010, 12, 31))
+    obs   = make_data(2000:2010)
+    model = make_data(2000:2010; toffset = 3.0, pscale = 2.0, source = "ModelX")
+
+    bc = fit_bias_correction(obs, model; ref = ref)
+    @test bc.kinds[:tmax] == :additive
+    @test bc.kinds[:precip] == :multiplicative
+    @test all(≈(-3.0), values(bc.adjust[:tmax]))   # remove the +3 °C offset
+    @test all(≈(0.5),  values(bc.adjust[:precip]))  # undo the ×2 precip
+
+    corr = apply_bias_correction(model, bc)
+    @test occursin("bias-corrected", corr.source)
+    @test all(isapprox.(corr.table.tmax, obs.table.tmax; atol = 1e-6))
+    @test all(isapprox.(corr.table.precip, obs.table.precip; atol = 1e-6))
+    # Corrected model reproduces the observed index exactly.
+    @test days_above(corr, 30).days == days_above(obs, 30).days
+    # One-shot helper agrees with the two-step path.
+    @test bias_correct(model, obs; ref = ref).table.tmax == corr.table.tmax
+end
+
+@testset "ensemble" begin
+    loc = Location("T", "N", 0.0, 0.0, 0.0)
+    m1 = make_data(2000:2010; toffset = 1.0, source = "A")
+    m2 = make_data(2000:2010; toffset = 2.0, source = "B")
+    ens = Ensemble(loc, [m1, m2], ["A", "B"])
+
+    summ = ensemble_index(ens, d -> days_above(d, 30))
+    @test names(summ) == ["year", "lo", "median", "hi", "mean", "n"]
+    @test all(summ.n .== 2)
+    @test issorted(summ.year)
+    @test all(summ.lo .<= summ.median .<= summ.hi)
+    # Warmer member has at least as many hot days as the cooler one.
+    @test all(summ.hi .>= summ.lo)
+
+    @test bias_correct(ens, m1).members[1].source == "A (bias-corrected)"
+
+    plt = plot_index(days_above(m1, 30); label = "A")
+    @test plot_ensemble!(plt, summ; label = "ens") isa Plots.Plot
+end
+
 # Network-dependent tests only run when explicitly enabled, because CI / the
 # build sandbox usually has no outbound internet access.
 if get(ENV, "CLIMSTATS_NETWORK_TESTS", "false") == "true"
