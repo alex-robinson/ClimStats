@@ -1,0 +1,14 @@
+# Julia
+Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/build.log
+docs/build/
+
+# Generated example output
+examples/*.png
+
+# Editor / OS
+.vscode/
+.DS_Store
