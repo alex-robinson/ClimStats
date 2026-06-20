@@ -6,7 +6,8 @@ using JSON3
 using Plots
 using Statistics
 using Test
-using ClimStats: _eprob, _quantile_sorted
+using ClimStats: _eprob, _quantile_sorted,
+    _normalize_scenario, _scenario_for_year, _nexgddp_url, NEXGDDP_VARMAP, NEXGDDP_BASE
 
 # Build a synthetic two-year dataset we can reason about exactly.
 function synthetic_data()
@@ -219,6 +220,48 @@ end
 
     plt = plot_index(days_above(m1, 30); label = "A")
     @test plot_ensemble!(plt, summ; label = "ens") isa Plots.Plot
+end
+
+@testset "NEX-GDDP / SSP logic" begin
+    # historical/SSP routing splits at 2014
+    @test _scenario_for_year(2000, "ssp245") == "historical"
+    @test _scenario_for_year(2014, "ssp245") == "historical"
+    @test _scenario_for_year(2015, "ssp245") == "ssp245"
+
+    # scenario normalisation + labels
+    @test _normalize_scenario(:ssp245) == "ssp245"
+    @test _normalize_scenario("SSP585") == "ssp585"
+    @test_throws ArgumentError _normalize_scenario(:ssp999)
+    @test scenario_label(:ssp126) == "SSP1-2.6"
+    @test scenario_label(:ssp585) == "SSP5-8.5"
+    @test Set(SSP_SCENARIOS) == Set([:ssp126, :ssp245, :ssp370, :ssp585])
+
+    # model registry: defaults and overrides
+    @test nexgddp_model_spec("ACCESS-CM2") == ("r1i1p1f1", "gn")
+    @test nexgddp_model_spec("GFDL-ESM4") == ("r1i1p1f1", "gr1")
+    @test nexgddp_model_spec("ACCESS-CM2"; grid = "gr") == ("r1i1p1f1", "gr")
+    @test nexgddp_model_spec("Unknown-Model") == ("r1i1p1f1", "gn")
+
+    # unit conversions: K -> °C, kg m⁻² s⁻¹ -> mm/day
+    @test NEXGDDP_VARMAP.tmax[1] == "tasmax"
+    @test NEXGDDP_VARMAP.tmax[2](273.15) ≈ 0.0
+    @test NEXGDDP_VARMAP.precip[2](1.0) ≈ 86400.0
+
+    # OPeNDAP URL construction
+    url = _nexgddp_url(NEXGDDP_BASE, "ACCESS-CM2", "ssp245",
+                       "r1i1p1f1", "gn", "tasmax", 2050)
+    @test endswith(url,
+        "ACCESS-CM2/ssp245/r1i1p1f1/tasmax/tasmax_day_ACCESS-CM2_ssp245_r1i1p1f1_gn_2050.nc")
+
+    # without NCDatasets loaded, the backend errors helpfully (not a MethodError)
+    loc = Location("T", "N", 52.5, 13.4, 0.0)
+    err = try
+        nexgddp_daily(loc); nothing
+    catch e
+        e
+    end
+    @test err isa ErrorException && occursin("NCDatasets", err.msg)
+    @test_throws ErrorException ssp_ensemble(loc; models = ["ACCESS-CM2"])
 end
 
 # Network-dependent tests only run when explicitly enabled, because CI / the

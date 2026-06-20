@@ -21,9 +21,11 @@ warming = annual_mean(data; var = :tmean)  # yearly mean temperature
 plot_index(hot)
 ```
 
-Data are fetched live from the free, key-less Open-Meteo APIs, so an internet
-connection is required. See `era5_daily`, `projection_daily`, the index helpers
-(`days_above`, `frost_days`, `annual_mean`, …) and `plot_index`.
+ERA5 history and the Open-Meteo CMIP6 ensemble are fetched live from the free,
+key-less Open-Meteo APIs (internet required). SSP-scenario projections use the
+NASA NEX-GDDP-CMIP6 backend (`nexgddp_daily`, `ssp_ensemble`, `climate_ssp`),
+enabled by `using NCDatasets`. See also `era5_daily`, the index helpers
+(`days_above`, `frost_days`, `annual_mean`, …), `bias_correct` and `plot_index`.
 """
 module ClimStats
 
@@ -43,6 +45,8 @@ export BiasCorrection, QuantileCorrection, AbstractBiasCorrection
 export fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
 export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
 export plot_index, plot_index!, plot_ensemble!, climate_timeseries, climate_projection
+export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
+export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp
 
 include("types.jl")
 include("providers.jl")
@@ -50,5 +54,6 @@ include("indices.jl")
 include("bias.jl")
 include("ensemble.jl")
 include("plotting.jl")
+include("nexgddp.jl")
 
 end # module ClimStats

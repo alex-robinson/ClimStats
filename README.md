@@ -166,9 +166,43 @@ bias_correct(model, hist; method = :qdm)   # or :eqm, :delta
 climate_projection("Berlin, Germany"; method = :qdm)
 ```
 
-Planned next: **SSP scenario** selection (needs a scenario-aware data backend —
-Open-Meteo's CMIP6 ensemble follows a single fixed pathway). See
-`PROJECTION_MODELS` for the models currently available.
+## SSP scenarios (NEX-GDDP-CMIP6)
+
+Open-Meteo's CMIP6 ensemble follows a single fixed pathway, so for
+scenario-aware projections ClimStats adds a **NASA NEX-GDDP-CMIP6** backend:
+daily, statistically downscaled (0.25°) CMIP6 covering historical (1950–2014)
+and the four SSPs — `:ssp126`, `:ssp245`, `:ssp370`, `:ssp585` — to 2100.
+
+It reads point time series over OPeNDAP, so it needs the NetCDF stack. That is
+an **optional dependency**, enabled via a package extension — just load it:
+
+```julia
+using ClimStats
+using NCDatasets        # enables the NEX-GDDP backend
+
+# One model, one scenario (historical + SSP spliced into one daily series):
+data = nexgddp_daily("Berlin, Germany"; model = "MPI-ESM1-2-HR", scenario = :ssp585)
+
+# The headline SSP figure: ERA5 history + a bias-corrected ensemble per scenario.
+plt = climate_ssp("Berlin, Germany"; threshold = 30,
+                  scenarios = (:ssp126, :ssp245, :ssp585))
+savefig(plt, "berlin_hot_days_ssp.png")
+```
+
+`nexgddp_daily` returns the same [`ClimateData`](#) shape as `era5_daily`, so
+indices, quantile-mapping bias correction and plotting all apply. `ssp_ensemble`
+builds a multi-model `Ensemble` for one scenario; `climate_ssp` overlays one
+shaded fan per SSP.
+
+> **Download cost.** NEX-GDDP stores one file per model/scenario/variable/year,
+> so requests fan out into many OPeNDAP reads. `climate_ssp` therefore defaults
+> to a small model set (`NEXGDDP_DEFAULT_MODELS`) and fetches only the variable
+> the index needs. Widen `models`, `vars` and the year range as needed.
+>
+> Model realisation/grid labels vary; the registry (`nexgddp_model_spec`) covers
+> common cases and falls back to `r1i1p1f1`/`gn`. Override per call with
+> `variant`/`grid` if a model uses something else (unavailable files are skipped
+> with a warning rather than aborting the ensemble).
 
 ## Project layout
 
@@ -178,11 +212,15 @@ src/
   types.jl       # Location, ClimateData
   providers.jl   # geocode + era5_daily + projection_daily (Open-Meteo)
   indices.jl     # days_above/below, annual_mean/sum, named indices, trend
-  bias.jl        # bias correction against the ERA5 baseline
+  bias.jl        # bias correction (delta + quantile mapping) vs ERA5
   ensemble.jl    # multi-model ensembles + spread summaries
   plotting.jl    # plot_index, plot_ensemble!, climate_timeseries/projection
+  nexgddp.jl     # NEX-GDDP-CMIP6 / SSP logic + climate_ssp (pure parts)
+ext/
+  ClimStatsNCDatasetsExt.jl  # NetCDF/OPeNDAP reads (loaded by `using NCDatasets`)
 examples/
-  berlin.jl      # the headline example end-to-end
+  berlin.jl      # the headline ERA5 example end-to-end
+  berlin_ssp.jl  # SSP scenarios via NEX-GDDP-CMIP6
 test/
   runtests.jl    # offline unit tests (+ optional live tests)
 ```
@@ -205,6 +243,8 @@ CLIMSTATS_NETWORK_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
 ## Status
 
 Early days (`v0.1`). Complete: ERA5 retrieval, indices, plotting, multi-model
-CMIP6 ensembles, combined past+future figures, and bias adjustment against ERA5
-with delta-change *and* quantile-mapping (QDM/EQM) methods. Next up: a
-scenario-aware backend so projections can be selected by SSP.
+CMIP6 ensembles, combined past+future figures, bias adjustment against ERA5
+(delta-change *and* quantile-mapping QDM/EQM), and SSP-scenario projections via
+the NEX-GDDP-CMIP6 backend (`climate_ssp`). The live NEX-GDDP path is
+implemented against NASA NCCS OPeNDAP but, unlike the offline-tested core, has
+not yet been exercised end-to-end here — try it and report back.
