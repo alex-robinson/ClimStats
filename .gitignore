@@ -9,6 +9,9 @@ docs/build/
 # Generated example output
 examples/*.png
 
+# Ad-hoc run logs
+logs/
+
 # Editor / OS
 .vscode/
 .DS_Store

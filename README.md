@@ -173,6 +173,63 @@ bias_correct(model, hist; method = :qdm)   # or :eqm, :delta
 climate_projection("Berlin, Germany"; method = :qdm)
 ```
 
+## The current year: a nowcast estimate
+
+ERA5 lags real time by about a week, so the **current calendar year is always
+incomplete**. A hot-day count or precipitation total computed on it is a
+misleading lower bound (the summer may not have happened yet); an annual mean is
+seasonally biased. Rather than plot that partial value, ClimStats *completes* the
+year and shows a statistical estimate with an uncertainty band.
+
+By default `climate_timeseries` and `climate_projection` drop the trailing
+partial year from the solid history and overlay it as a lighter diamond with a
+lo–hi error bar:
+
+```julia
+fig = climate_timeseries("Berlin, Germany"; threshold = 30)   # nowcast = true by default
+```
+
+![history + nowcast](docs/src/assets/berlin_hot_days_nowcast.png)
+
+The same estimate appears on the combined past+future figure (run
+[`examples/berlin_nowcast.jl`](examples/berlin_nowcast.jl) to render it):
+
+```julia
+fig = climate_projection("Berlin, Germany"; threshold = 30)   # ERA5 + CMIP6, to 2050
+```
+
+**How the estimate is built** — analog resampling (`src/nowcast.jl`):
+
+1. Compare the current year's observed window (Jan 1 → last available day)
+   against the *same calendar window* of every complete prior year, by RMSE of
+   the daily variable. Closer years are better analogs.
+2. Turn those distances into weights with a Gaussian kernel (optionally keeping
+   only the top-K analogs).
+3. For each analog year, take its remaining days as a candidate trajectory for
+   the rest of *this* year — **anchored** by shifting it so its window mean
+   matches the current year's (additive for temperatures, multiplicative for
+   precip). This tracks how the year is actually running and preserves the
+   day-to-day structure within an analog.
+4. Each anchored analog yields a *completed* daily series; running an index over
+   the weighted members gives the median and lo–hi band that are plotted.
+
+You can call the estimator directly for any index:
+
+```julia
+data = era5_daily("Berlin, Germany")
+est  = estimate_current_year(data, d -> days_above(d, 30; var = :tmax); var = :tmax)
+# CurrentYearEstimate(2026: 5 [1–11], 165/365 days, 20 analogs)  (illustrative)
+
+est.median, est.lo, est.hi      # the estimate and its band
+est.observed_partial            # the (lower-bound) count from observed days only
+```
+
+`complete_current_year(data)` returns the completed daily members themselves —
+each an ordinary `ClimateData` with a Boolean `:estimated` column (`false` for
+observed days, `true` for analog-filled days), so the synthetic tail never
+silently mixes with observations. Pass `nowcast = false` to either plot helper
+to fall back to the raw partial value.
+
 ## SSP scenarios (NEX-GDDP-CMIP6)
 
 Open-Meteo's CMIP6 ensemble follows a single fixed pathway, so for
@@ -245,13 +302,15 @@ src/
   indices.jl     # days_above/below, annual_mean/sum, named indices, trend
   bias.jl        # bias correction (delta + quantile mapping) vs ERA5
   ensemble.jl    # multi-model ensembles + spread summaries
-  plotting.jl    # plot_index, plot_ensemble!, climate_timeseries/projection
+  nowcast.jl     # analog-year estimate for the incomplete current year
+  plotting.jl    # plot_index, plot_ensemble!, plot_nowcast!, climate_timeseries/projection
   nexgddp.jl     # NEX-GDDP-CMIP6 / SSP logic + climate_ssp (pure parts)
 ext/
   ClimStatsNCDatasetsExt.jl  # NetCDF/OPeNDAP reads (loaded by `using NCDatasets`)
 examples/
-  berlin.jl      # the headline ERA5 example end-to-end
-  berlin_ssp.jl  # SSP scenarios via NEX-GDDP-CMIP6
+  berlin.jl          # the headline ERA5 example end-to-end
+  berlin_nowcast.jl  # current-year nowcast on history and projection figures
+  berlin_ssp.jl      # SSP scenarios via NEX-GDDP-CMIP6
 test/
   runtests.jl    # offline unit tests (+ optional live tests)
 ```
@@ -275,7 +334,8 @@ CLIMSTATS_NETWORK_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
 
 Early days (`v0.1`). Complete: ERA5 retrieval, indices, plotting, multi-model
 CMIP6 ensembles, combined past+future figures, bias adjustment against ERA5
-(delta-change *and* quantile-mapping QDM/EQM), and SSP-scenario projections via
-the NEX-GDDP-CMIP6 backend (`climate_ssp`). The live NEX-GDDP path is
+(delta-change *and* quantile-mapping QDM/EQM), a current-year nowcast estimate
+for the incomplete trailing year, and SSP-scenario projections via the
+NEX-GDDP-CMIP6 backend (`climate_ssp`). The live NEX-GDDP path is
 implemented against NASA NCCS OPeNDAP but, unlike the offline-tested core, has
 not yet been exercised end-to-end here — try it and report back.
