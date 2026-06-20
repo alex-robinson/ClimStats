@@ -10,16 +10,18 @@ data *and* a figure — e.g. a time series of the number of days per year above
 
 ```julia
 using ClimStats
+using CairoMakie        # a Makie backend (see "Plotting backends" below)
 
 fig = climate_timeseries("Berlin, Germany"; threshold = 30)
-save("berlin_hot_days.png", fig)        # `save` is re-exported from CairoMakie
+save("berlin_hot_days.png", fig)        # `save` is re-exported from Makie
 ```
 
 ![example](examples/berlin_hot_days.png)
 
-Figures are built with [Makie](https://docs.makie.org) via the CairoMakie
-backend. `using ClimStats` activates it and re-exports `save`, so the line above
-works as-is; load `GLMakie` yourself if you want interactive windows instead.
+Figures are built with [Makie](https://docs.makie.org) **core**, so you choose
+the backend: `CairoMakie` for publication-quality files, `GLMakie`/`WGLMakie`
+for interactive windows (and, later, dashboards). See
+[Plotting backends](#plotting-backends).
 
 ## Installation
 
@@ -30,7 +32,8 @@ Pkg.develop(path = ".")   # from a clone of this repo
 # Pkg.add(url = "https://github.com/alex-robinson/climstats")
 ```
 
-Then `instantiate` to pull the dependencies (DataFrames, HTTP, JSON3, CairoMakie):
+Then `instantiate` to pull the dependencies (DataFrames, HTTP, JSON3, Makie).
+You'll also want a Makie **backend** for rendering — `Pkg.add("CairoMakie")`:
 
 ```julia
 Pkg.activate(".")
@@ -207,6 +210,30 @@ shaded fan per SSP.
 > common cases and falls back to `r1i1p1f1`/`gn`. Override per call with
 > `variant`/`grid` if a model uses something else (unavailable files are skipped
 > with a warning rather than aborting the ensemble).
+
+## Plotting backends
+
+ClimStats depends only on **Makie core** and builds backend-agnostic `Figure`s;
+you bring the backend. Load one before rendering or saving:
+
+| backend     | use for                                            |
+|-------------|----------------------------------------------------|
+| `CairoMakie`| static, publication-quality files (PNG/PDF/SVG)    |
+| `GLMakie`   | fast interactive windows (zoom/pan, exploration)   |
+| `WGLMakie`  | browser/notebook output — the basis for a dashboard|
+
+```julia
+using ClimStats
+using CairoMakie                       # or GLMakie / WGLMakie
+
+fig = climate_projection("Berlin, Germany"; threshold = 30)
+save("berlin.png", fig)                # `save` needs a backend loaded
+# display(fig)                         # interactive with GLMakie/WGLMakie
+```
+
+All plot helpers return a `Makie.Figure`, and the mutating ones (`plot_index!`,
+`plot_ensemble!`) draw into its `Axis`, so figures compose and can be embedded in
+a larger Makie layout — the intended path to an interactive dashboard later.
 
 ## Project layout
 

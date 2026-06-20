@@ -3,7 +3,7 @@ using ClimStats: _build_table, _tofloat, _daily_param, DAILY_VARMAP
 using DataFrames
 using Dates
 using JSON3
-using CairoMakie
+using Makie
 using Statistics
 using Test
 using ClimStats: _eprob, _quantile_sorted,

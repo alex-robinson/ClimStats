@@ -1,10 +1,13 @@
 # Headline example: hot days per year in Berlin from ERA5.
 #
-# Run from the package root with:
+# ClimStats builds figures with Makie (core) but doesn't ship a backend, so add
+# one to render/save. Run from the package root with:
+#     julia --project=. -e 'import Pkg; Pkg.add("CairoMakie")'
 #     julia --project=. examples/berlin.jl
 # (needs internet access to reach the Open-Meteo APIs).
 
 using ClimStats
+using CairoMakie        # Makie backend for writing PNGs (use GLMakie for windows)
 using Dates
 
 # 1. The one-liner the package is built around.

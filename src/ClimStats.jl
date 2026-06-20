@@ -8,10 +8,11 @@ Quick start
 -----------
 ```julia
 using ClimStats
+using CairoMakie            # a Makie backend: CairoMakie for files, GLMakie for windows
 
 # One-liner: location string in, figure out.
 fig = climate_timeseries("Berlin, Germany"; threshold = 30)
-save("berlin_hot_days.png", fig)   # `save` re-exported from CairoMakie
+save("berlin_hot_days.png", fig)   # `save` re-exported from Makie
 
 # Or step by step, to compute many things from the same download.
 data   = era5_daily("Berlin, Germany")     # daily tmax/tmin/tmean/precip
@@ -24,7 +25,9 @@ plot_index(hot)
 ERA5 history and the Open-Meteo CMIP6 ensemble are fetched live from the free,
 key-less Open-Meteo APIs (internet required). SSP-scenario projections use the
 NASA NEX-GDDP-CMIP6 backend (`nexgddp_daily`, `ssp_ensemble`, `climate_ssp`),
-enabled by `using NCDatasets`. See also `era5_daily`, the index helpers
+enabled by `using NCDatasets`. Plots are built with Makie (core); load a backend
+(`CairoMakie` to save files, `GLMakie`/`WGLMakie` for interactive use) to render
+or `save` the returned `Figure`. See also `era5_daily`, the index helpers
 (`days_above`, `frost_days`, `annual_mean`, …), `bias_correct` and `plot_index`.
 """
 module ClimStats
@@ -35,7 +38,7 @@ using Statistics
 using DataFrames
 using HTTP
 using JSON3
-using CairoMakie
+using Makie
 
 export Location, ClimateData, geocode, table, variables
 export era5_daily, projection_daily, default_stop, PROJECTION_MODELS
@@ -45,7 +48,7 @@ export BiasCorrection, QuantileCorrection, AbstractBiasCorrection
 export fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
 export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
 export plot_index, plot_index!, plot_ensemble!, climate_timeseries, climate_projection
-export save  # re-exported from CairoMakie, so `using ClimStats` is enough to save figures
+export save  # re-exported from Makie; load a backend (CairoMakie/GLMakie) to render
 export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
 export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp
 

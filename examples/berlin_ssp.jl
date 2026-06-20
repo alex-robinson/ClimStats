@@ -1,13 +1,14 @@
 # SSP-scenario projections for Berlin via NASA NEX-GDDP-CMIP6.
 #
-# Needs the NetCDF stack and internet access to NASA NCCS OPeNDAP:
-#     julia --project=. -e 'import Pkg; Pkg.add("NCDatasets")'
+# Needs a Makie backend, the NetCDF stack, and internet access to NASA NCCS:
+#     julia --project=. -e 'import Pkg; Pkg.add(["CairoMakie", "NCDatasets"])'
 #     julia --project=. examples/berlin_ssp.jl
 #
 # NEX-GDDP fans out into one OPeNDAP read per model/scenario/variable/year, so
 # this can take a while; it is kept small (few models, one variable) by default.
 
 using ClimStats
+using CairoMakie        # Makie backend for writing the figure
 using NCDatasets        # loads the NEX-GDDP backend (package extension)
 using Dates
 
