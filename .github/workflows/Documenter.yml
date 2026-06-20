@@ -1,11 +1,19 @@
 name: Documentation
 
+# Only rebuild/deploy the site when the docs change — not on every push to the
+# repo. (The workflow file itself is included so changes to it still deploy;
+# trigger a build by hand via the Actions tab for anything else.)
 on:
   push:
     branches:
       - main
-    tags: ['*']
+    paths:
+      - 'docs/**'
+      - '.github/workflows/Documenter.yml'
   pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/Documenter.yml'
   workflow_dispatch:
 
 # Needed for Documenter to push to gh-pages and to comment preview links on PRs.
