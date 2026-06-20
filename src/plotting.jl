@@ -207,6 +207,9 @@ Keyword arguments
   period (default 1950–2050).
 - `show_members`     : also draw each member as a faint line (default `false`).
 - `band`             : shade the ensemble spread (default `true`).
+- `nowcast`          : show the trailing, incomplete ERA5 year as a nowcast
+  estimate (lighter marker + error bar) instead of a partial count (default
+  `true`); see [`estimate_current_year`](@ref).
 """
 function climate_projection(place::AbstractString;
                             threshold::Real = 30,
@@ -221,7 +224,8 @@ function climate_projection(place::AbstractString;
                             proj_start::Date = Date(1950, 1, 1),
                             proj_stop::Date = Date(2050, 12, 31),
                             show_members::Bool = false,
-                            band::Bool = true)
+                            band::Bool = true,
+                            nowcast::Bool = true)
     loc  = geocode(place)
     hist = era5_daily(loc; start = hist_start, stop = hist_stop)
     ens  = projection_ensemble(loc; models = models,
@@ -240,7 +244,12 @@ function climate_projection(place::AbstractString;
         "$(place_lbl)  ·  ERA5 + CMIP6 ensemble"
     ylabel = index === nothing ? "days per year" : string(vc)
 
-    fig, ax = _figure_with_history(hist_idx, vc; title = title, ylabel = ylabel)
+    # Drop the trailing partial ERA5 year from the solid history; it returns as a
+    # nowcast estimate below.
+    Yinc = nowcast ? incomplete_final_year(hist) : nothing
+    solid = Yinc === nothing ? hist_idx : hist_idx[hist_idx.year .!= Yinc, :]
+
+    fig, ax = _figure_with_history(solid, vc; title = title, ylabel = ylabel)
     if show_members
         for mem in ens.members
             mi = indexfn(mem)
@@ -251,6 +260,11 @@ function climate_projection(place::AbstractString;
     plot_ensemble!(ax, summary;
                    label = correct ? "CMIP6 (bias-corr.)" : "CMIP6",
                    band = band, color = 2)
+    if Yinc !== nothing
+        simvar = index === nothing ? var : _default_sim_var(hist)
+        est = estimate_current_year(hist, indexfn; var = simvar, valuecol = vc)
+        plot_nowcast!(ax, est; color = 1)
+    end
     axislegend(ax; position = :lt)
     return fig
 end
