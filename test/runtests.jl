@@ -223,6 +223,64 @@ end
     @test plot_ensemble!(fig, summ; label = "ens") isa Figure
 end
 
+# Sinusoidal daily data spanning a start..stop window, with an optional extra
+# offset applied only to a chosen year (to exercise analog anchoring).
+function make_data_span(start::Date, stop::Date; warmyear = nothing, warmoffset = 0.0)
+    dates = start:Day(1):stop
+    doy = Dates.dayofyear.(dates)
+    tmax = 12 .+ 20 .* sin.(2π .* (doy .- 80) ./ 365)
+    if warmyear !== nothing
+        tmax = tmax .+ [Dates.year(d) == warmyear ? warmoffset : 0.0 for d in dates]
+    end
+    df = DataFrame(date = collect(dates),
+                   tmax = Vector{Union{Missing,Float64}}(tmax),
+                   tmin = Vector{Union{Missing,Float64}}(tmax .- 8),
+                   tmean = Vector{Union{Missing,Float64}}(tmax .- 4),
+                   precip = Vector{Union{Missing,Float64}}(fill(2.0, length(dates))))
+    ClimateData(Location("T", "N", 0.0, 0.0, 0.0), "ERA5", df)
+end
+
+@testset "nowcast current year" begin
+    # 2008–2014 complete, 2015 partial (ends 31 March → no summer observed yet).
+    data = make_data_span(Date(2008, 1, 1), Date(2015, 3, 31))
+    full = make_data_span(Date(2008, 1, 1), Date(2015, 12, 31))
+    ref = only(days_above(full, 30).days[days_above(full, 30).year .== 2015])
+
+    @test incomplete_final_year(data) == 2015
+    @test incomplete_final_year(full) === nothing
+
+    est = estimate_current_year(data, d -> days_above(d, 30; var = :tmax);
+                                var = :tmax, valuecol = :days)
+    @test est isa CurrentYearEstimate
+    @test est.year == 2015
+    @test est.n_total == 365
+    @test est.n_obs == 90                         # Jan+Feb+Mar 2015
+    @test est.observed_partial == 0               # no hot days observed by March
+    @test est.lo <= est.median <= est.hi
+    # All analog years are identical sinusoids, so the completed year reproduces
+    # the true full-year count exactly.
+    @test est.median ≈ ref
+    @test est.lo ≈ ref && est.hi ≈ ref
+
+    # Completed members: flagged daily series reaching 31 December.
+    members = complete_current_year(data; var = :tmax)
+    @test !isempty(members)
+    m = first(members)
+    @test hasproperty(m.table, :estimated)
+    @test maximum(m.table.date) == Date(2015, 12, 31)
+    obs_rows = count(==(false), m.table.estimated)
+    @test obs_rows == nrow(data.table)            # observed rows unchanged
+    @test all(m.table.estimated[m.table.date .> Date(2015, 3, 31)])
+    @test count(==(true), m.table.estimated) == 275  # Apr–Dec 2015 (365 − 90)
+
+    # Anchoring: a 2015 running 10 °C warm projects warmer than climatology.
+    warm = make_data_span(Date(2008, 1, 1), Date(2015, 3, 31);
+                          warmyear = 2015, warmoffset = 10.0)
+    ewarm = estimate_current_year(warm, d -> days_above(d, 30; var = :tmax);
+                                  var = :tmax, valuecol = :days)
+    @test ewarm.median > est.median
+end
+
 @testset "NEX-GDDP / SSP logic" begin
     # historical/SSP routing splits at 2014
     @test _scenario_for_year(2000, "ssp245") == "historical"

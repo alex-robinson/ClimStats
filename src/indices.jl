@@ -3,6 +3,17 @@
 # Each index reduces the daily table to one value per calendar year and returns
 # a tidy DataFrame ready for plotting. Years are taken from the `:date` column.
 
+# Pick a sensible value column of an annual-index DataFrame when the caller
+# doesn't specify one. Shared by the plotting and nowcast helpers.
+function _default_valuecol(df::DataFrame)
+    for c in (:days, :mean, :total)
+        hasproperty(df, c) && return c
+    end
+    cols = filter(c -> c ∉ (:year, :n_days), propertynames(df))
+    isempty(cols) && error("Could not find a value column in $(propertynames(df)).")
+    return first(cols)
+end
+
 """
     annual_count(data, predicate; var = :tmax) -> DataFrame
 

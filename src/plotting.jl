@@ -23,16 +23,6 @@ function _axis(fig::Figure)
     error("No Axis found in figure.")
 end
 
-# Pick a sensible value column when the caller doesn't specify one.
-function _default_valuecol(df::DataFrame)
-    for c in (:days, :mean, :total)
-        hasproperty(df, c) && return c
-    end
-    cols = filter(c -> c ∉ (:year, :n_days), propertynames(df))
-    isempty(cols) && error("Could not find a value column in $(propertynames(df)).")
-    return first(cols)
-end
-
 # Create a fresh Figure + Axis ready for index time series (no legend yet).
 function _new_axis(; title = "", ylabel = "")
     fig = Figure()
