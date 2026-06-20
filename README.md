@@ -146,15 +146,29 @@ climate_projection("Berlin, Germany"; index = d -> annual_mean(d; var = :tmean))
 
 Models carry systematic biases relative to reanalysis, so raw model values can't
 feed absolute-threshold indices directly. ClimStats corrects each model towards
-ERA5 over a reference period (default the 1991–2020 WMO normal) using a
-per-calendar-month delta — **additive** for temperatures, **multiplicative** for
-precipitation (`fit_bias_correction` / `apply_bias_correction` / `bias_correct`).
-This removes the model's mean seasonal bias while preserving its climate-change
-signal. A distribution-based method (quantile mapping) is the natural next
-refinement; the `BiasCorrection` type is general enough to host one.
+ERA5 over a reference period (default the 1991–2020 WMO normal), per calendar
+month, with a choice of method (`fit_bias_correction` / `apply_bias_correction` /
+`bias_correct`, or the `method` keyword to `climate_projection`):
 
-Planned further refinements: scenario (SSP) selection and quantile-mapping bias
-correction. See `PROJECTION_MODELS` for the models currently available.
+| `method`  | what it does                                                        |
+|-----------|---------------------------------------------------------------------|
+| `:qdm`    | **Quantile Delta Mapping** (default) — matches the whole distribution to ERA5 *and* preserves the model's projected change at each quantile (Cannon et al. 2015). Best for projections. |
+| `:eqm`    | Empirical Quantile Mapping — matches the distribution to ERA5 by CDF. |
+| `:delta`  | Per-month mean shift only — fast, corrects the mean but not the distribution shape. |
+
+All methods are **additive** for temperatures and **multiplicative** for
+precipitation. Quantile mapping corrects not just the mean but the variance and
+tails, which is what makes threshold indices (days > 30 °C, frost days, …)
+trustworthy on model data.
+
+```julia
+bias_correct(model, hist; method = :qdm)   # or :eqm, :delta
+climate_projection("Berlin, Germany"; method = :qdm)
+```
+
+Planned next: **SSP scenario** selection (needs a scenario-aware data backend —
+Open-Meteo's CMIP6 ensemble follows a single fixed pathway). See
+`PROJECTION_MODELS` for the models currently available.
 
 ## Project layout
 
@@ -190,7 +204,7 @@ CLIMSTATS_NETWORK_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
 
 ## Status
 
-Early days (`v0.1`). The ERA5 retrieval, indices, and plotting path is complete,
-and so is the projections step: multi-model CMIP6 ensembles, bias adjustment
-against ERA5, and combined past+future figures. Next up: SSP scenario selection
-and quantile-mapping bias correction.
+Early days (`v0.1`). Complete: ERA5 retrieval, indices, plotting, multi-model
+CMIP6 ensembles, combined past+future figures, and bias adjustment against ERA5
+with delta-change *and* quantile-mapping (QDM/EQM) methods. Next up: a
+scenario-aware backend so projections can be selected by SSP.

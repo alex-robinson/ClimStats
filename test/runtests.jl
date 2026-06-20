@@ -4,7 +4,9 @@ using DataFrames
 using Dates
 using JSON3
 using Plots
+using Statistics
 using Test
+using ClimStats: _eprob, _quantile_sorted
 
 # Build a synthetic two-year dataset we can reason about exactly.
 function synthetic_data()
@@ -137,6 +139,66 @@ end
     @test days_above(corr, 30).days == days_above(obs, 30).days
     # One-shot helper agrees with the two-step path.
     @test bias_correct(model, obs; ref = ref).table.tmax == corr.table.tmax
+end
+
+# Minimal ClimateData with a single temperature column on given dates.
+cd_tmax(dates, t; source = "ERA5") =
+    ClimateData(Location("T", "N", 0.0, 0.0, 0.0), source,
+                DataFrame(date = collect(dates),
+                          tmax = Vector{Union{Missing,Float64}}(t)))
+
+@testset "quantile mapping helpers" begin
+    s = Float64[1, 2, 3, 4, 5]
+    @test _quantile_sorted(s, 0.0) == 1.0
+    @test _quantile_sorted(s, 1.0) == 5.0
+    @test _quantile_sorted(s, 0.5) == 3.0          # median
+    @test 0.0 <= _eprob(s, 3.0) <= 1.0
+    @test _eprob(s, -100.0) < _eprob(s, 100.0)     # monotone in x
+    @test _eprob(s, 3.0) ≈ 0.5 atol = 0.11         # middle value ~ median rank
+end
+
+@testset "quantile mapping correction" begin
+    dates = Date(2000, 1, 1):Day(1):Date(2009, 12, 31)
+    doy = Dates.dayofyear.(dates)
+    # seasonal cycle + an 11-day component so months have real internal spread
+    base = 12 .+ 20 .* sin.(2π .* (doy .- 80) ./ 365) .+ 5 .* sin.(2π .* doy ./ 11)
+    ref = (first(dates), last(dates))
+
+    # (a) pure additive shift: QM should recover the observed distribution.
+    obs   = cd_tmax(dates, base)
+    model = cd_tmax(dates, base .+ 3.0; source = "M")
+    for m in (:qdm, :eqm)
+        corr = bias_correct(model, obs; method = m, ref = ref)
+        @test occursin(string(m), corr.source)
+        cv = Float64.(corr.table.tmax); ov = Float64.(obs.table.tmax)
+        @test abs(mean(cv) - mean(ov)) < 0.2
+        for q in (0.1, 0.5, 0.9)
+            @test abs(quantile(cv, q) - quantile(ov, q)) < 0.3
+        end
+    end
+
+    # (b) inflated variance + bias: QM corrects the spread, delta does not.
+    infl = mean(base) .+ 1.8 .* (base .- mean(base)) .+ 2.0
+    obs2   = cd_tmax(dates, base)
+    model2 = cd_tmax(dates, infl; source = "M")
+    qdm   = bias_correct(model2, obs2; method = :qdm,   ref = ref)
+    delta = bias_correct(model2, obs2; method = :delta, ref = ref)
+    sobs = std(Float64.(obs2.table.tmax))
+    err_qdm   = abs(std(Float64.(qdm.table.tmax))   - sobs)
+    err_delta = abs(std(Float64.(delta.table.tmax)) - sobs)
+    @test err_qdm < err_delta                       # QM fixes distribution shape
+
+    # (c) multiplicative QM on precipitation recovers the observed mean.
+    pobs = 1.0 .+ Float64.(doy .% 5)
+    obsP = ClimateData(Location("T", "N", 0, 0, 0), "ERA5",
+                       DataFrame(date = collect(dates),
+                                 precip = Vector{Union{Missing,Float64}}(pobs)))
+    modP = ClimateData(Location("T", "N", 0, 0, 0), "M",
+                       DataFrame(date = collect(dates),
+                                 precip = Vector{Union{Missing,Float64}}(2 .* pobs)))
+    corrP = bias_correct(modP, obsP; method = :qdm, ref = ref)
+    @test all(corrP.table.precip .>= 0)
+    @test abs(mean(corrP.table.precip) - mean(obsP.table.precip)) < 0.2
 end
 
 @testset "ensemble" begin

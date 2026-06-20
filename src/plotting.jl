@@ -137,6 +137,7 @@ Keyword arguments
   instead (e.g. `d -> annual_mean(d; var = :tmean)`).
 - `models`           : ensemble members (default [`PROJECTION_MODELS`](@ref)).
 - `correct`          : bias-correct members against ERA5 (default `true`).
+- `method`           : bias-correction method, `:qdm` (default), `:eqm` or `:delta`.
 - `ref`              : bias-correction reference period (default 1991–2020).
 - `hist_start`/`hist_stop` : ERA5 period; `proj_start`/`proj_stop` : projection
   period (default 1950–2050).
@@ -149,6 +150,7 @@ function climate_projection(place::AbstractString;
                             index = nothing,
                             models = PROJECTION_MODELS,
                             correct::Bool = true,
+                            method::Symbol = :qdm,
                             ref::Tuple{Date,Date} = DEFAULT_REF,
                             hist_start::Date = Date(1950, 1, 1),
                             hist_stop::Date = default_stop(),
@@ -161,7 +163,7 @@ function climate_projection(place::AbstractString;
     hist = era5_daily(loc; start = hist_start, stop = hist_stop)
     ens  = projection_ensemble(loc; models = models,
                                start = proj_start, stop = proj_stop)
-    correct && (ens = bias_correct(ens, hist; ref = ref))
+    correct && (ens = bias_correct(ens, hist; method = method, ref = ref))
 
     indexfn = index === nothing ? (d -> days_above(d, threshold; var = var)) : index
     hist_idx = indexfn(hist)
