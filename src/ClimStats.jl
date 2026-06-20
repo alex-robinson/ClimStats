@@ -48,7 +48,7 @@ export BiasCorrection, QuantileCorrection, AbstractBiasCorrection
 export fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
 export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
 export CurrentYearEstimate, incomplete_final_year, complete_current_year, estimate_current_year
-export plot_index, plot_index!, plot_ensemble!, climate_timeseries, climate_projection
+export plot_index, plot_index!, plot_ensemble!, plot_nowcast!, climate_timeseries, climate_projection
 export save  # re-exported from Makie; load a backend (CairoMakie/GLMakie) to render
 export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
 export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp

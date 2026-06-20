@@ -279,6 +279,10 @@ end
     ewarm = estimate_current_year(warm, d -> days_above(d, 30; var = :tmax);
                                   var = :tmax, valuecol = :days)
     @test ewarm.median > est.median
+
+    # Plotting overlay is a thin consumer of the estimate.
+    fig = plot_index(days_above(full, 30); label = "ERA5")
+    @test plot_nowcast!(fig, est) isa Figure
 end
 
 @testset "NEX-GDDP / SSP logic" begin

@@ -122,7 +122,29 @@ function _figure_with_history(hist_idx, vc; title, ylabel)
 end
 
 """
-    climate_timeseries(place; threshold = 30, var = :tmax, start, stop, kwargs...) -> Figure
+    plot_nowcast!(target, est; color = 1, label, markersize = 9, kwargs...) -> target
+
+Overlay a [`CurrentYearEstimate`](@ref) for the incomplete final year onto
+`target` (an `Axis` or `Figure`): a lighter-shade diamond marker at the weighted
+median with a vertical `lo`–`hi` error bar, so it reads as an estimate distinct
+from the solid observed history. Returns `target`.
+"""
+function plot_nowcast!(target, est::CurrentYearEstimate;
+                       color = 1,
+                       label = @sprintf("%d estimate", est.year),
+                       markersize::Real = 9, kwargs...)
+    ax = _axis(target)
+    col = _tocolor(color)
+    light = (col, 0.55)
+    x = Float64(est.year)
+    rangebars!(ax, [x], [est.lo], [est.hi]; color = light, linewidth = 2, whiskerwidth = 10)
+    scatter!(ax, [x], [est.median]; color = light, marker = :diamond,
+             markersize = markersize, label = label, kwargs...)
+    return target
+end
+
+"""
+    climate_timeseries(place; threshold = 30, var = :tmax, start, stop, nowcast = true, kwargs...) -> Figure
 
 End-to-end convenience: geocode `place`, download ERA5, count the days per year
 with `var` above `threshold`, and return the figure.
@@ -138,6 +160,7 @@ function climate_timeseries(place::AbstractString;
                             var::Symbol = :tmax,
                             start::Date = Date(1950, 1, 1),
                             stop::Date = default_stop(),
+                            nowcast::Bool = true,
                             kwargs...)
     data = era5_daily(place; start = start, stop = stop)
     yearly = days_above(data, threshold; var = var)
@@ -145,8 +168,20 @@ function climate_timeseries(place::AbstractString;
     place_lbl = isempty(loc.country) ? loc.name : "$(loc.name), $(loc.country)"
     title = @sprintf("%s — days/yr with %s > %g°C (ERA5)",
                      place_lbl, string(var), float(threshold))
-    return plot_index(yearly; valuecol = :days, title = title,
-                      ylabel = "days per year", label = "ERA5", kwargs...)
+
+    # The trailing year is partial; show it as a nowcast estimate (lighter marker
+    # + error bar) rather than as a misleading partial count on the solid series.
+    Yinc = nowcast ? incomplete_final_year(data) : nothing
+    fig, ax = _new_axis(; title = title, ylabel = "days per year")
+    solid = Yinc === nothing ? yearly : yearly[yearly.year .!= Yinc, :]
+    plot_index!(ax, solid; valuecol = :days, label = "ERA5", kwargs...)
+    if Yinc !== nothing
+        est = estimate_current_year(data, d -> days_above(d, threshold; var = var);
+                                    var = var, valuecol = :days)
+        plot_nowcast!(ax, est; color = 1)
+    end
+    axislegend(ax; position = :lt)
+    return fig
 end
 
 """
