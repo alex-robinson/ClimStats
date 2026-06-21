@@ -12,6 +12,7 @@ HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [weakdeps]
@@ -28,6 +29,7 @@ HTTP = "1"
 JSON3 = "1"
 Makie = "0.20, 0.21, 0.22, 0.23, 0.24"
 NCDatasets = "0.14, 0.15"
+SHA = "0.7.0"
 julia = "1.9"
 
 [extras]

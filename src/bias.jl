@@ -297,11 +297,36 @@ end
 
 # --- convenience ------------------------------------------------------------
 
+# Cached worker: fit + apply, returning just the corrected table (Arrow-friendly).
+# Keyed on the content of both series plus every fit parameter, so an identical
+# correction is computed once. The applied result is what callers want, and a
+# fit object (nested Dicts) does not serialise as cleanly as the table.
+@cached cachetype="climstats/biascorr" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; model=_content_hash(a.model), obs=_content_hash(a.obs), method=string(a.method), ref=string.(a.ref), by=string(a.by), vars=_key_vars(a.vars), kinds=_key_kinds(a.kinds), a.maxscale, a.maxratio)) function _bias_correct_cached(; model, obs, method, ref, by, vars, kinds, maxscale, maxratio)
+    fit = fit_bias_correction(obs, model; method, ref, by, vars, kinds, maxscale, maxratio)
+    return apply_bias_correction(model, fit).table
+end
+
 """
-    bias_correct(model, obs; method = :delta, kwargs...) -> ClimateData
+    bias_correct(model, obs; method = :delta, cache = true, kwargs...) -> ClimateData
 
 Fit a correction of `model` towards `obs` and apply it in one step. `method` and
-`kwargs` are forwarded to [`fit_bias_correction`](@ref).
+`kwargs` are forwarded to [`fit_bias_correction`](@ref). The corrected series is
+cached on disk keyed by the content of both inputs and the fit parameters; pass
+`cache = false` to recompute.
 """
-bias_correct(model::ClimateData, obs::ClimateData; kwargs...) =
-    apply_bias_correction(model, fit_bias_correction(obs, model; kwargs...))
+function bias_correct(model::ClimateData, obs::ClimateData;
+                      method::Symbol = :delta,
+                      ref::Tuple{Date,Date} = DEFAULT_REF,
+                      by::Symbol = :month,
+                      vars = nothing,
+                      kinds::Union{Nothing,AbstractDict} = nothing,
+                      maxscale::Real = 10.0,
+                      maxratio::Real = 10.0,
+                      cache::Bool = true)
+    tbl = _bias_correct_cached(; model, obs, method, ref, by, vars, kinds,
+                               maxscale = float(maxscale), maxratio = float(maxratio),
+                               cached = cache)
+    src = method === :delta ? model.source * " (bias-corrected)" :
+          model.source * " (bias-corrected, $method)"
+    return ClimateData(model.location, src, tbl)
+end

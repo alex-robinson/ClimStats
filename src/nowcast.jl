@@ -255,8 +255,33 @@ end
 
 # --- public API -------------------------------------------------------------
 
+# Cached analog completion: one DataFrame stacking every completed member (full
+# observed + filled rows), tagged with :_analog (the analog year) and :_weight
+# (its normalised weight). This is the expensive, index-independent step; both
+# public entry points reconstruct what they need from it, so the analog
+# resampling runs once per (data, settings) regardless of which index is asked.
+@cached cachetype="climstats/nowcast" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; data=_content_hash(a.data), var=string(a.var), n_analogs=_key_opt(a.n_analogs), bandwidth=_key_opt(a.bandwidth), a.min_obs, a.maxscale)) function _analogs_cached(; data, var, n_analogs, bandwidth, min_obs, maxscale)
+    built = _build_analogs(data; var, n_analogs, bandwidth, min_obs, maxscale)
+    parts = DataFrame[]
+    for a in built.analogs
+        t = copy(a.member.table)
+        t[!, :_analog] = fill(a.year, nrow(t))
+        t[!, :_weight] = fill(a.weight, nrow(t))
+        push!(parts, t)
+    end
+    isempty(parts) && error("No analogs produced for nowcast.")
+    return reduce(vcat, parts)
+end
+
+# Reconstruct one analog member's ClimateData from a cached sub-frame.
+function _member_from_group(data::ClimateData, sub)
+    A = first(sub._analog)
+    tbl = DataFrame(select(sub, Not([:_analog, :_weight])))
+    return ClimateData(data.location, "$(data.source) (nowcast, analog $A)", tbl)
+end
+
 """
-    complete_current_year(data; var, n_analogs = 20, bandwidth, min_obs, maxscale) -> Vector{ClimateData}
+    complete_current_year(data; var, n_analogs = 20, bandwidth, min_obs, maxscale, cache = true) -> Vector{ClimateData}
 
 Build the ensemble of completed daily series for the trailing, incomplete year
 of `data`: one [`ClimateData`](@ref) per weighted analog year, each the observed
@@ -265,15 +290,24 @@ how the current year is running. Every member carries a Boolean `:estimated`
 column (`false` for observed days, `true` for filled days).
 
 `var` (default mean temperature if present) drives the analog similarity; see the
-module notes for the method. Errors if the final year is already complete.
+module notes for the method. The completions are cached on disk keyed by the
+content of `data` and the analog settings (`cache = false` recomputes). Errors
+if the final year is already complete.
 """
 function complete_current_year(data::ClimateData;
-                               var::Symbol = _default_sim_var(data), kwargs...)
-    return [a.member for a in _build_analogs(data; var = var, kwargs...).analogs]
+                               var::Symbol = _default_sim_var(data),
+                               n_analogs::Union{Nothing,Int} = 20,
+                               bandwidth::Union{Nothing,Real} = nothing,
+                               min_obs::Int = 7,
+                               maxscale::Real = 10.0,
+                               cache::Bool = true)
+    big = _analogs_cached(; data, var, n_analogs, bandwidth, min_obs,
+                          maxscale = float(maxscale), cached = cache)
+    return [_member_from_group(data, sub) for sub in groupby(big, :_analog)]
 end
 
 """
-    estimate_current_year(data, indexfn; var, valuecol, lo = 0.1, hi = 0.9, kwargs...) -> CurrentYearEstimate
+    estimate_current_year(data, indexfn; var, valuecol, lo = 0.1, hi = 0.9, cache = true, kwargs...) -> CurrentYearEstimate
 
 Estimate an annual index for the trailing, incomplete year of `data` by running
 `indexfn` (a `ClimateData -> DataFrame` index, e.g. `d -> days_above(d, 30)`)
@@ -282,27 +316,39 @@ summarising the result as a weighted median with a `lo`–`hi` band.
 
 `var` selects the variable the analog similarity keys on (default the index's
 own variable when called from the high-level helpers); `valuecol` the index
-column to summarise (auto-detected by default). Extra `kwargs` (`n_analogs`,
-`bandwidth`, `min_obs`, `maxscale`) are forwarded to the analog builder. Returns
-a [`CurrentYearEstimate`](@ref).
+column to summarise (auto-detected by default). Extra keyword arguments
+(`n_analogs`, `bandwidth`, `min_obs`, `maxscale`) tune the analog builder and
+`cache` toggles reuse of the (index-independent) completions. Returns a
+[`CurrentYearEstimate`](@ref).
 """
 function estimate_current_year(data::ClimateData, indexfn;
                                var::Symbol = _default_sim_var(data),
                                valuecol::Union{Nothing,Symbol} = nothing,
-                               lo::Real = 0.1, hi::Real = 0.9, kwargs...)
-    built = _build_analogs(data; var = var, kwargs...)
-    Y = built.year
+                               lo::Real = 0.1, hi::Real = 0.9,
+                               n_analogs::Union{Nothing,Int} = 20,
+                               bandwidth::Union{Nothing,Real} = nothing,
+                               min_obs::Int = 7,
+                               maxscale::Real = 10.0,
+                               cache::Bool = true)
+    Y = incomplete_final_year(data)
+    Y === nothing &&
+        error("The final year of $(data.source) is complete; nothing to nowcast.")
+    big = _analogs_cached(; data, var, n_analogs, bandwidth, min_obs,
+                          maxscale = float(maxscale), cached = cache)
+    n_total = Dates.value(Date(Y, 12, 31) - Date(Y, 1, 1)) + 1
+    n_obs = count(==(Y), Dates.year.(data.table.date))
+
     vc = valuecol
     yrs = Int[]; vals = Float64[]; ws = Float64[]
-    for a in built.analogs
-        idf = indexfn(a.member)
+    for sub in groupby(big, :_analog)
+        idf = indexfn(_member_from_group(data, sub))
         vc === nothing && (vc = _default_valuecol(idf))
         row = idf[idf.year .== Y, :]
         nrow(row) == 0 && continue
         x = row[1, vc]
-        push!(yrs, a.year)
+        push!(yrs, first(sub._analog))
         push!(vals, (ismissing(x) || (x isa AbstractFloat && isnan(x))) ? NaN : Float64(x))
-        push!(ws, a.weight)
+        push!(ws, first(sub._weight))
     end
     isempty(vals) && error("No analog produced an index value for $Y.")
     vc === nothing && (vc = :value)
@@ -313,7 +359,7 @@ function estimate_current_year(data::ClimateData, indexfn;
     op = (nrow(prow) == 0 || ismissing(prow[1, vc])) ? NaN : Float64(prow[1, vc])
 
     members = [(year = yrs[i], value = vals[i], weight = ws[i]) for i in eachindex(vals)]
-    return CurrentYearEstimate(Y, built.n_obs, built.n_total, op,
+    return CurrentYearEstimate(Y, n_obs, n_total, op,
                                _weighted_quantile(vals, ws, 0.5),
                                _weighted_quantile(vals, ws, lo),
                                _weighted_quantile(vals, ws, hi),

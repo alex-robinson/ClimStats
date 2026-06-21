@@ -158,6 +158,24 @@ end
     @test bias_correct(model, obs; ref = ref).table.tmax == corr.table.tmax
 end
 
+@testset "derived cache (content hash & round-trip)" begin
+    obs   = make_data(2000:2010)
+    model = make_data(2000:2010; toffset = 3.0, pscale = 2.0, source = "ModelX")
+
+    # Content hash is stable, and sensitive to both values and the source label.
+    @test ClimStats._content_hash(obs) == ClimStats._content_hash(make_data(2000:2010))
+    @test ClimStats._content_hash(obs) != ClimStats._content_hash(model)
+    @test ClimStats._content_hash(make_data(2000:2010)) !=
+          ClimStats._content_hash(make_data(2000:2010; source = "other"))
+
+    # The cached correction round-trips to exactly the uncached result.
+    cached   = bias_correct(model, obs; method = :qdm)
+    uncached = bias_correct(model, obs; method = :qdm, cache = false)
+    @test cached.table.tmax == uncached.table.tmax
+    @test cached.table.precip == uncached.table.precip
+    @test cached.source == uncached.source
+end
+
 # Minimal ClimateData with a single temperature column on given dates.
 cd_tmax(dates, t; source = "ERA5") =
     ClimateData(Location("T", "N", 0.0, 0.0, 0.0), source,
