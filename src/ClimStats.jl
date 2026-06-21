@@ -54,6 +54,7 @@ export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
 export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp
 
 include("types.jl")
+include("cache.jl")
 include("providers.jl")
 include("indices.jl")
 include("bias.jl")

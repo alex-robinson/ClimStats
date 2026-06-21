@@ -98,6 +98,21 @@ end
     @test !hasproperty(df, :tmin)             # not in payload -> not a column
 end
 
+@testset "cache keying helpers" begin
+    # Coordinates snap to the 0.25° source grid (so nearby/geocode-noisy points
+    # share one cached download).
+    @test ClimStats._snap(52.524) == 52.5
+    @test ClimStats._snap(13.405) == 13.5
+    @test ClimStats._snap(-0.13) == -0.25
+    @test ClimStats._snap(0.0) == 0.0
+    @test ClimStats._snap(13.5) == 13.5       # already on grid -> unchanged
+
+    # The stable/tail boundary is the last day of the previous complete month.
+    @test ClimStats._last_complete_month_end(Date(2026, 6, 14)) == Date(2026, 5, 31)
+    @test ClimStats._last_complete_month_end(Date(2026, 1, 3))  == Date(2025, 12, 31)
+    @test ClimStats._last_complete_month_end(Date(2024, 3, 31)) == Date(2024, 2, 29)  # leap year
+end
+
 @testset "plotting (smoke)" begin
     d = synthetic_data()
     fig = plot_index(days_above(d, 30); title = "test")

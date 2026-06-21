@@ -138,31 +138,80 @@ data = era5_daily("Berlin, Germany"; start = Date(1980,1,1), stop = Date(2024,12
 Keyword arguments
 - `start::Date`    : first day (default `1950-01-01`; ERA5 reaches back to 1940).
 - `stop::Date`     : last day (default ≈ today − 7 days).
-- `vars`           : variables to fetch (default all of
+- `vars`           : variables to return (default all of
   `(:tmax, :tmin, :tmean, :precip)`).
 - `timezone`       : timezone for daily aggregation (default `"auto"`, i.e. the
   location's local time, so "days" align with the local calendar).
+- `cache::Bool`    : reuse an on-disk copy of the series instead of re-downloading
+  (default `true`); pass `false` to force a fresh fetch.
 
 Data are ERA5/ERA5-Land served by the Open-Meteo archive API.
+
+Caching (see `src/cache.jl`): the request point is snapped to the 0.25° ERA5
+grid and the stable history is stored once per cell as Arrow, so any later call
+for the same cell — at any date range or variable subset — is served from disk.
+Only the recent, still-changing tail is fetched live each time; the stable cache
+rolls forward once a month, which is also when newly-finalised ERA5 values
+replace the preliminary ERA5T edge.
 """
 era5_daily(place::AbstractString; kwargs...) = era5_daily(geocode(place); kwargs...)
 
-function era5_daily(loc::Location;
-                    start::Date = Date(1950, 1, 1),
-                    stop::Date  = default_stop(),
-                    vars = keys(DAILY_VARMAP),
-                    timezone = "auto")
-    start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
+"First day of the ERA5 history we cache from (the archive itself reaches to 1940)."
+const ERA5_EPOCH = Date(1950, 1, 1)
+
+# Raw Open-Meteo archive fetch for one cell: all of the network work, no caching.
+function _fetch_era5_raw(lat, lon, vars, start::Date, stop::Date, timezone)
     json = _get_json(ARCHIVE_URL, Dict(
-        "latitude"   => string(loc.latitude),
-        "longitude"  => string(loc.longitude),
+        "latitude"   => string(lat),
+        "longitude"  => string(lon),
         "start_date" => string(start),
         "end_date"   => string(stop),
         "daily"      => _daily_param(vars),
         "timezone"   => timezone,
     ))
-    haskey(json, :daily) || error("Open-Meteo archive returned no data for $loc.")
-    return ClimateData(loc, "ERA5", _build_table(json.daily))
+    haskey(json, :daily) ||
+        error("Open-Meteo archive returned no data for ($lat, $lon).")
+    return _build_table(json.daily)
+end
+
+# The stable history [ERA5_EPOCH, through], content-addressed and stored as Arrow.
+# Always all four variables (per-cell reuse beats per-variable thrift for a tiny
+# series), so the key carries no `vars`. `through` rolls once a month, so the key
+# both gains newly-available days and re-pulls the range — letting final ERA5
+# overwrite the preliminary ERA5T edge. `_timezone` is excluded from the hash.
+@cached cachetype="climstats/era5" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.lat, a.lon, through = string(a.through))) function _era5_stable(; lat, lon, through::Date, _timezone = "auto")
+    return _fetch_era5_raw(lat, lon, collect(keys(DAILY_VARMAP)),
+                           ERA5_EPOCH, through, _timezone)
+end
+
+function era5_daily(loc::Location;
+                    start::Date = ERA5_EPOCH,
+                    stop::Date  = default_stop(),
+                    vars = keys(DAILY_VARMAP),
+                    timezone = "auto",
+                    cache::Bool = true)
+    start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
+    for v in vars
+        haskey(DAILY_VARMAP, v) || error("Unknown variable :$v. Choose from " *
+                                         "$(collect(keys(DAILY_VARMAP))).")
+    end
+    lat = _snap(loc.latitude)
+    lon = _snap(loc.longitude)
+    through = _last_complete_month_end(default_stop())
+    allvars = collect(keys(DAILY_VARMAP))
+
+    df = _era5_stable(; lat, lon, through, _timezone = timezone, cached = cache)
+    # Requests reaching before the cached epoch or past the stable boundary get
+    # those slivers fetched live and spliced on — they are never cached.
+    start < ERA5_EPOCH &&
+        (df = vcat(_fetch_era5_raw(lat, lon, allvars, start, ERA5_EPOCH - Day(1),
+                                   timezone), df))
+    stop > through &&
+        (df = vcat(df, _fetch_era5_raw(lat, lon, allvars, through + Day(1), stop,
+                                       timezone)))
+
+    df = df[(df.date .>= start) .& (df.date .<= stop), :]
+    return ClimateData(loc, "ERA5", select(df, :date, collect(vars)...))
 end
 
 # --- CMIP6 (climate projections) -------------------------------------------

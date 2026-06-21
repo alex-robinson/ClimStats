@@ -1,10 +1,12 @@
 name = "ClimStats"
 uuid = "e3e40ae2-acdf-4baf-96a7-cba441c69b91"
-authors = ["alex-robinson"]
 version = "0.1.0"
+authors = ["alex-robinson"]
 
 [deps]
+Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataManifest = "b8ee69ef-a20a-4d38-bceb-a68d72817f72"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
@@ -19,7 +21,9 @@ NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 ClimStatsNCDatasetsExt = "NCDatasets"
 
 [compat]
+Arrow = "2.8.1"
 DataFrames = "1"
+DataManifest = "0.36.1"
 HTTP = "1"
 JSON3 = "1"
 Makie = "0.20, 0.21, 0.22, 0.23, 0.24"
