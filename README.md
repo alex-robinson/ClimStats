@@ -98,7 +98,9 @@ gridded files):
 | past (ERA5)         | `archive-api.open-meteo.com`        | ERA5 / ERA5-Land   |
 | future (CMIP6)      | `climate-api.open-meteo.com`        | CMIP6 (downscaled) |
 
-> **Network access is required at runtime.** Data are fetched live.
+> **Network access is required for the *first* fetch of a location.** Data are
+> fetched live, then cached on disk so the same series is not downloaded again —
+> see [Caching](#caching-fetch-once-reuse-everywhere).
 
 ### Why not the Copernicus CDS directly?
 
@@ -109,6 +111,51 @@ of overhead. ClimStats therefore starts with Open-Meteo's ERA5 archive, but the
 provider layer is deliberately thin and isolated (`src/providers.jl`): a future
 CDS-backed downloader only has to return a `ClimateData` using the same column
 convention, and every index/plot helper keeps working unchanged.
+
+## Caching (fetch once, reuse everywhere)
+
+Downloads are the slow, rate-limited part, so ClimStats caches both the data it
+fetches **and** the expensive things it derives. Caching is on by default, fully
+transparent, and persists across sessions — the second run of a location is
+served from disk. It is built on [DataManifest.jl](https://github.com/awi-esc/DataManifest.jl)'s
+content-addressed `@cached` store (see [`src/cache.jl`](src/cache.jl)).
+
+What gets cached, and how it is keyed:
+
+| layer                     | function(s)                                   | keyed by |
+|---------------------------|-----------------------------------------------|----------|
+| ERA5 point series         | `era5_daily`                                  | snapped cell + stable month |
+| NEX-GDDP point series     | `nexgddp_daily`                               | snapped cell + model/scenario/variant/grid/variable |
+| bias-corrected series     | `bias_correct`                                | content of both inputs + fit parameters |
+| nowcast analog completions| `complete_current_year`, `estimate_current_year` | content of `data` + analog settings |
+
+Two conventions make the cache *reusable* rather than per-request:
+
+- **Coordinates snap to the 0.25° source grid.** Nearby queries (or the same
+  place geocoded twice with float noise) resolve to one cached download.
+- **One fetch serves many queries.** ERA5 stores the full history `[1950 … last
+  complete month]` once per cell — any later call at *any* date range or variable
+  subset is sliced from it. Only the recent, still-changing tail is fetched live;
+  that stable cache rolls forward once a month, which is also when finalised ERA5
+  replaces the preliminary ERA5T edge. NEX-GDDP is a fixed archive, so its full
+  1950–2100 span is cached once per cell and never re-read.
+- **Derived results skip recompute, not just re-download.** Bias-correction fits
+  and the nowcast's analog resampling are cached as their *index-independent*
+  intermediates, so running ten different indices over one location recomputes
+  nothing.
+
+Every entry is a portable Arrow file (readable from Python/JS too), under the
+per-project user cache dir (`~/Library/Caches/datamanifest/…` on macOS,
+`$XDG_CACHE_HOME/datamanifest/…` on Linux). Pass `cache = false` to any of the
+functions above to force a fresh computation:
+
+```julia
+era5_daily("Berlin, Germany"; cache = false)            # ignore the cache
+bias_correct(model, hist; method = :qdm, cache = false)
+```
+
+For a deployed dashboard, point DataManifest's `datacache_dir` at a shared,
+persistent volume so every instance reuses one cache.
 
 ## Projections: past + future on one figure
 
@@ -259,9 +306,13 @@ builds a multi-model `Ensemble` for one scenario; `climate_ssp` overlays one
 shaded fan per SSP.
 
 > **Download cost.** NEX-GDDP stores one file per model/scenario/variable/year,
-> so requests fan out into many OPeNDAP reads. `climate_ssp` therefore defaults
-> to a small model set (`NEXGDDP_DEFAULT_MODELS`) and fetches only the variable
-> the index needs. Widen `models`, `vars` and the year range as needed.
+> so a *cold* request fans out into many OPeNDAP reads. That cost is paid once:
+> the full 1950–2100 span is [cached](#caching-fetch-once-reuse-everywhere) per
+> cell/model/scenario/variable, and later calls (any sub-range) are served from
+> disk. `climate_ssp` still defaults to a small model set
+> (`NEXGDDP_DEFAULT_MODELS`) and fetches only the variable the index needs, so
+> the first run stays manageable; widen `models`, `vars` and the year range as
+> needed.
 >
 > Model realisation/grid labels vary; the registry (`nexgddp_model_spec`) covers
 > common cases and falls back to `r1i1p1f1`/`gn`. Override per call with
@@ -298,6 +349,7 @@ a larger Makie layout — the intended path to an interactive dashboard later.
 src/
   ClimStats.jl   # module, exports, includes
   types.jl       # Location, ClimateData
+  cache.jl       # on-disk caching (DataManifest @cached): Arrow codec, grid snap, content hash
   providers.jl   # geocode + era5_daily + projection_daily (Open-Meteo)
   indices.jl     # days_above/below, annual_mean/sum, named indices, trend
   bias.jl        # bias correction (delta + quantile mapping) vs ERA5
@@ -335,7 +387,9 @@ CLIMSTATS_NETWORK_TESTS=true julia --project=. -e 'using Pkg; Pkg.test()'
 Early days (`v0.1`). Complete: ERA5 retrieval, indices, plotting, multi-model
 CMIP6 ensembles, combined past+future figures, bias adjustment against ERA5
 (delta-change *and* quantile-mapping QDM/EQM), a current-year nowcast estimate
-for the incomplete trailing year, and SSP-scenario projections via the
-NEX-GDDP-CMIP6 backend (`climate_ssp`). The live NEX-GDDP path is
-implemented against NASA NCCS OPeNDAP but, unlike the offline-tested core, has
-not yet been exercised end-to-end here — try it and report back.
+for the incomplete trailing year, SSP-scenario projections via the
+NEX-GDDP-CMIP6 backend (`climate_ssp`), and transparent on-disk
+[caching](#caching-fetch-once-reuse-everywhere) of fetched and derived data. The
+live NEX-GDDP path is implemented against NASA NCCS OPeNDAP but, unlike the
+offline-tested core, has not yet been exercised end-to-end here — try it and
+report back.

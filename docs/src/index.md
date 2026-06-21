@@ -13,14 +13,15 @@ save("berlin_hot_days.png", fig)
 ```
 
 ERA5 history and the Open-Meteo CMIP6 ensemble are fetched live from the free,
-key-less Open-Meteo APIs (internet required). See the
+key-less Open-Meteo APIs on first use, then **cached on disk** so the same series
+is never re-downloaded (see [Caching](caching.md)). See the
 [README](https://github.com/alex-robinson/ClimStats) for the full tour — indices,
-bias correction, ensembles and SSP scenarios. These docs focus on the
-**current-year nowcast**.
+bias correction, ensembles and SSP scenarios. These docs focus on **caching** and
+the **current-year nowcast**.
 
 ## Contents
 
 ```@contents
-Pages = ["nowcast.md"]
+Pages = ["caching.md", "nowcast.md"]
 Depth = 2
 ```
