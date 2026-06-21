@@ -103,6 +103,11 @@ function _nexgddp_url(base, model, scenario, variant, grid, nexvar, year; versio
     return "$(base)/$(model)/$(scenario)/$(variant)/$(nexvar)/$(fname)"
 end
 
+# Full span of the NEX-GDDP-CMIP6 archive (historical 1950–2014 + SSP 2015–2100).
+# The archive is fixed, so the extension caches one full-span series per cell.
+const NEXGDDP_START = Date(1950, 1, 1)
+const NEXGDDP_STOP  = Date(2100, 12, 31)
+
 # --- backend entry point (real method provided by the NCDatasets extension) ---
 
 """
