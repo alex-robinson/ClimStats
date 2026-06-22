@@ -184,6 +184,390 @@ function climate_timeseries(place::AbstractString;
     return fig
 end
 
+const _MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+# Day-of-year of the first of each month (non-leap), for day-of-year axis ticks.
+const _MONTH_STARTS = [Dates.dayofyear(Date(2001, m, 1)) for m in 1:12]
+
+_place_label(loc) = isempty(loc.country) ? loc.name : "$(loc.name), $(loc.country)"
+
+# Run `f()` with offline mode forced to `offline`, restoring the prior setting
+# afterwards. Used by the high-level helpers to honour their `offline` keyword
+# (which also gates the geocoding call in their string methods).
+function _with_offline(f, offline::Bool)
+    prev = set_offline!(offline)
+    try
+        return f()
+    finally
+        set_offline!(prev)
+    end
+end
+
+# Climatological mean of `var` on a single day-of-year, ±window window, over the
+# given inclusive `(first_year, last_year)` period. `missing` if no observations.
+function _doy_clim(data::ClimateData, var::Symbol, doy::Integer; window, period)
+    c = daily_climatology(data; var = var, window = window, period = period)
+    return only(c[c.doy .== doy, :mean])
+end
+
+# (tmin, tmean, tmax) climatology on `doy` for one ClimateData …
+function _day_bar(data::ClimateData, doy; window, period)
+    f(v) = _doy_clim(data, v, doy; window = window, period = period)
+    return (lo = f(:tmin), mid = f(:tmean), hi = f(:tmax))
+end
+
+# … and averaged across the members of an ensemble (skipping missing members).
+function _day_bar(ens::Ensemble, doy; window, period)
+    triples = [_day_bar(m, doy; window = window, period = period) for m in ens.members]
+    avg(field) = begin
+        vals = collect(skipmissing(getfield(t, field) for t in triples))
+        isempty(vals) ? missing : mean(vals)
+    end
+    return (lo = avg(:lo), mid = avg(:mid), hi = avg(:hi))
+end
+
+# Build the bias-corrected CMIP6 ensemble covering the bias-ref + future span,
+# or `nothing` (with a warning) when no projection data can be downloaded.
+function _future_ensemble(loc, hist; models, correct, method, bias_ref, future,
+                          start::Date)
+    isempty(future) && return nothing
+    try
+        stop = Date(maximum(last(p) for p in future), 12, 31)
+        ens = projection_ensemble(loc; models = models, start = start, stop = stop)
+        correct && (ens = bias_correct(ens, hist; method = method, ref = bias_ref))
+        return ens
+    catch err
+        @warn "No projection data available; future periods omitted" exception = err
+        return nothing
+    end
+end
+
+"""
+    climate_day_comparison(place; date = today(), window = 3, ref, recent, future, ...) -> Figure
+
+Compare today's forecast against the day-of-year temperature climatology across
+several eras, as a column of vertical bars. Each bar spans the climatological
+`tmin`–`tmax` for `date`'s day-of-year (smoothed over a `±window`-day window),
+with a tick at the mean (`tmean`):
+
+- **black** — today's forecast `tmin`–`tmax` (from [`forecast_daily`](@ref)),
+- **grey**  — the `ref` reference period (default 1981–2010),
+- **`recent`** — the recent observed period (default 2011–2025), from ERA5,
+- **`future`** — one bar per future period (default 2041–2050), from a
+  bias-corrected CMIP6 ensemble; silently omitted if no projection data is
+  available.
+
+Pass `offline = true` (or set the `CLIMSTATS_OFFLINE` environment variable) to
+plot only from cached data without any network access; the live forecast bar is
+omitted in that case.
+
+```julia
+fig = climate_day_comparison("Berlin, Germany")
+save("berlin_today_vs_climate.png", fig)
+```
+"""
+climate_day_comparison(place::AbstractString; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _day_comparison(geocode(place); kwargs...)
+    end
+
+"`climate_day_comparison` for an already-resolved [`Location`](@ref) (no geocoding)."
+climate_day_comparison(loc::Location; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _day_comparison(loc; kwargs...)
+    end
+
+function _day_comparison(loc::Location;
+                                date::Date = Dates.today(),
+                                window::Integer = 3,
+                                ref::Tuple{Integer,Integer} = (1981, 2010),
+                                recent::Tuple{Integer,Integer} = (2011, 2025),
+                                future = ((2041, 2050),),
+                                models = PROJECTION_MODELS,
+                                correct::Bool = true,
+                                method::Symbol = :qdm,
+                                bias_ref::Tuple{Date,Date} = DEFAULT_REF,
+                                forecast::Bool = true,
+                                hist_start::Date = Date(1981, 1, 1))
+    doy  = Dates.dayofyear(date)
+    hist = era5_daily(loc; start = hist_start, stop = default_stop())
+
+    bars = NamedTuple[]
+    if forecast && !offline_mode()
+        fc = forecast_daily(loc)
+        r  = fc.table[fc.table.date .== date, :]
+        nrow(r) == 1 && push!(bars,
+            (label = "today", lo = r.tmin[1], mid = r.tmean[1], hi = r.tmax[1],
+             color = :black))
+    end
+    rb = _day_bar(hist, doy; window = window, period = ref)
+    push!(bars, (label = "$(ref[1])–$(ref[2])", lo = rb.lo, mid = rb.mid,
+                 hi = rb.hi, color = :gray60))
+    cb = _day_bar(hist, doy; window = window, period = recent)
+    push!(bars, (label = "$(recent[1])–$(recent[2])", lo = cb.lo, mid = cb.mid,
+                 hi = cb.hi, color = _color(1)))
+
+    ens = _future_ensemble(loc, hist; models = models, correct = correct,
+                           method = method, bias_ref = bias_ref, future = future,
+                           start = hist_start)
+    if ens !== nothing
+        for (i, per) in enumerate(future)
+            fb = _day_bar(ens, doy; window = window, period = per)
+            push!(bars, (label = "$(per[1])–$(per[2])", lo = fb.lo, mid = fb.mid,
+                         hi = fb.hi, color = _color(i + 2)))
+        end
+    end
+
+    fig = Figure()
+    ax = Axis(fig[1, 1];
+        ylabel = "temperature (°C)",
+        title = @sprintf("%s — temperature on %s  (±%d-day climatology)",
+                         _place_label(loc), Dates.format(date, "u d"), window),
+        xticks = (1:length(bars), [b.label for b in bars]),
+        xticklabelrotation = π / 8)
+    w = 0.6
+    for (x, b) in enumerate(bars)
+        (ismissing(b.lo) || ismissing(b.hi)) && continue
+        poly!(ax, Rect(x - w/2, b.lo, w, b.hi - b.lo);
+              color = (b.color, 0.35), strokecolor = b.color, strokewidth = 1.5)
+        ismissing(b.mid) || lines!(ax, [x - w/2, x + w/2], [b.mid, b.mid];
+                                   color = b.color, linewidth = 2.5)
+    end
+    return fig
+end
+
+# Per-month across-member spread of the period climatology, for the future bands.
+function _monthly_band(ens::Ensemble, period; var, lo, hi)
+    clims = [monthly_climatology(m; var = var, period = period) for m in ens.members]
+    lov = fill(NaN, 12); hiv = fill(NaN, 12); med = fill(NaN, 12)
+    for mo in 1:12
+        vals = Float64[]
+        for mc in clims
+            r = mc[mc.month .== mo, :mean]
+            (isempty(r) || ismissing(r[1])) && continue
+            push!(vals, Float64(r[1]))
+        end
+        isempty(vals) && continue
+        lov[mo] = quantile(vals, lo)
+        hiv[mo] = quantile(vals, hi)
+        med[mo] = median(vals)
+    end
+    return DataFrame(month = 1:12, lo = lov, median = med, hi = hiv)
+end
+
+"""
+    climate_monthly(place; var = :tmean, hist_start, future, ...) -> Figure
+
+Seasonal cycle of monthly-mean `var`: every observed year drawn as a faint grey
+line, with the most recent complete year and the current (partial) year
+highlighted. When projection data is available, each `future` period is added as
+a shaded across-model band. Pass `offline = true` (or set `CLIMSTATS_OFFLINE`)
+to plot only from cached data without any network access.
+
+```julia
+fig = climate_monthly("Berlin, Germany")
+save("berlin_monthly_climatology.png", fig)
+```
+"""
+climate_monthly(place::AbstractString; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _monthly(geocode(place); kwargs...)
+    end
+
+"`climate_monthly` for an already-resolved [`Location`](@ref) (no geocoding)."
+climate_monthly(loc::Location; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _monthly(loc; kwargs...)
+    end
+
+function _monthly(loc::Location;
+                         var::Symbol = :tmean,
+                         hist_start::Date = Date(1981, 1, 1),
+                         hist_stop::Date = default_stop(),
+                         future = ((2041, 2050),),
+                         models = PROJECTION_MODELS,
+                         correct::Bool = true,
+                         method::Symbol = :qdm,
+                         bias_ref::Tuple{Date,Date} = DEFAULT_REF,
+                         lo::Real = 0.1, hi::Real = 0.9)
+    hist = era5_daily(loc; start = hist_start, stop = hist_stop)
+    mm   = monthly_means(hist; var = var)
+
+    years     = sort(unique(mm.year))
+    this_year = maximum(years)
+    last_year = this_year - 1
+
+    fig = Figure()
+    ax = Axis(fig[1, 1]; xlabel = "month", ylabel = "mean temperature (°C)",
+        title = @sprintf("%s — seasonal cycle of %s", _place_label(loc), string(var)),
+        xticks = (1:12, _MONTH_ABBR))
+
+    for y in years
+        (y == this_year || y == last_year) && continue
+        d = mm[mm.year .== y, :]
+        lines!(ax, d.month, _tofloatvec(d.mean); color = (:gray, 0.25), linewidth = 0.7)
+    end
+
+    ens = _future_ensemble(loc, hist; models = models, correct = correct,
+                           method = method, bias_ref = bias_ref, future = future,
+                           start = hist_start)
+    if ens !== nothing
+        for (i, per) in enumerate(future)
+            b = _monthly_band(ens, per; var = var, lo = lo, hi = hi)
+            band!(ax, b.month, _tofloatvec(b.lo), _tofloatvec(b.hi);
+                  color = (_color(i + 2), 0.35), label = "$(per[1])–$(per[2])")
+        end
+    end
+
+    for (y, col, lbl) in ((last_year, _color(1), string(last_year)),
+                          (this_year, _color(2), "$(this_year) (so far)"))
+        d = mm[mm.year .== y, :]
+        nrow(d) == 0 && continue
+        scatterlines!(ax, d.month, _tofloatvec(d.mean); color = col,
+                      linewidth = 2.5, markersize = 7, label = lbl)
+    end
+    axislegend(ax; position = :lt, framevisible = false)
+    return fig
+end
+
+# Per-day-of-year quantile band, pooling the daily `var` of one or more
+# ClimateData over a `±window` window and the inclusive year `period`. Used for
+# both the observed historical interval ([hist]) and the future ensemble spread
+# (the ensemble members). Columns: `:doy`, `:lo`, `:median`, `:hi`.
+function _daily_band(datas::Vector{ClimateData}, period; var, window, lo, hi)
+    doys = Int[]; vals = Float64[]
+    for d in datas
+        df = d.table
+        hasproperty(df, var) || continue
+        w = _restrict_years(DataFrame(date = df.date, v = df[!, var]), period)
+        for i in eachindex(w.v)
+            ismissing(w.v[i]) && continue
+            push!(doys, Dates.dayofyear(w.date[i]))
+            push!(vals, Float64(w.v[i]))
+        end
+    end
+    lov = fill(NaN, 366); hiv = fill(NaN, 366); med = fill(NaN, 366)
+    for d in 1:366
+        pool = Float64[]
+        for k in eachindex(doys)
+            δ = abs(doys[k] - d); δ = min(δ, 366 - δ)
+            δ <= window && push!(pool, vals[k])
+        end
+        isempty(pool) && continue
+        lov[d] = quantile(pool, lo); hiv[d] = quantile(pool, hi); med[d] = median(pool)
+    end
+    return DataFrame(doy = 1:366, lo = lov, median = med, hi = hiv)
+end
+
+"""
+    climate_daily(place; var = :tmean, window = 3, ref, future, spaghetti = false, ...) -> Figure
+
+Daily-resolution companion to [`climate_monthly`](@ref): the seasonal cycle of
+daily `var` across the year (day-of-year axis). Drawn back-to-front:
+
+- a light band for the `ref` period's central **95 %** interval (`lo`…`hi`
+  quantiles per day-of-year, smoothed over a `±window`-day window),
+- a darker band per `future` period from the bias-corrected CMIP6 ensemble
+  (omitted if no projection data is available),
+- with `spaghetti = true`, every available year as a faint grey line,
+- the most recent complete year and the current (partial) year as darker lines,
+- and, when `forecast = true`, the live forecast as a `tmin`–`tmax` band with a
+  mean line in its own shade.
+
+Pass `offline = true` (or set the `CLIMSTATS_OFFLINE` environment variable) to
+plot only from cached data without any network access; the live forecast is
+omitted in that case.
+
+```julia
+fig = climate_daily("Berlin, Germany"; spaghetti = true)
+save("berlin_daily_climatology.png", fig)
+```
+"""
+climate_daily(place::AbstractString; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _daily(geocode(place); kwargs...)
+    end
+
+"`climate_daily` for an already-resolved [`Location`](@ref) (no geocoding)."
+climate_daily(loc::Location; offline::Bool = offline_mode(), kwargs...) =
+    _with_offline(offline) do
+        _daily(loc; kwargs...)
+    end
+
+function _daily(loc::Location;
+                       var::Symbol = :tmean,
+                       window::Integer = 3,
+                       ref::Tuple{Integer,Integer} = (1981, 2010),
+                       future = ((2041, 2050),),
+                       hist_start::Date = Date(1981, 1, 1),
+                       hist_stop::Date = default_stop(),
+                       spaghetti::Bool = false,
+                       forecast::Bool = true,
+                       models = PROJECTION_MODELS,
+                       correct::Bool = true,
+                       method::Symbol = :qdm,
+                       bias_ref::Tuple{Date,Date} = DEFAULT_REF,
+                       lo::Real = 0.025, hi::Real = 0.975)
+    hist = era5_daily(loc; start = hist_start, stop = hist_stop)
+    df   = hist.table
+    yr   = Dates.year.(df.date)
+
+    years     = sort(unique(yr))
+    this_year = maximum(years)
+    last_year = this_year - 1
+
+    fig = Figure()
+    ax = Axis(fig[1, 1]; xlabel = "month", ylabel = "$(string(var)) (°C)",
+        title = @sprintf("%s — daily %s", _place_label(loc), string(var)),
+        xticks = (_MONTH_STARTS, _MONTH_ABBR))
+
+    hb = _daily_band([hist], ref; var = var, window = window, lo = lo, hi = hi)
+    band!(ax, hb.doy, _tofloatvec(hb.lo), _tofloatvec(hb.hi);
+          color = (:gray, 0.25),
+          label = @sprintf("%d–%d 95%%", ref[1], ref[2]))
+
+    ens = _future_ensemble(loc, hist; models = models, correct = correct,
+                           method = method, bias_ref = bias_ref, future = future,
+                           start = hist_start)
+    if ens !== nothing
+        for (i, per) in enumerate(future)
+            fb = _daily_band(ens.members, per; var = var, window = window,
+                             lo = lo, hi = hi)
+            band!(ax, fb.doy, _tofloatvec(fb.lo), _tofloatvec(fb.hi);
+                  color = (_color(i + 2), 0.35), label = "$(per[1])–$(per[2])")
+        end
+    end
+
+    if spaghetti
+        for y in years
+            (y == this_year || y == last_year) && continue
+            d = df[yr .== y, :]
+            lines!(ax, Dates.dayofyear.(d.date), _tofloatvec(d[!, var]);
+                   color = (:gray, 0.20), linewidth = 0.5)
+        end
+    end
+
+    for (y, col, lbl) in ((last_year, _color(1), string(last_year)),
+                          (this_year, _color(2), "$(this_year) (so far)"))
+        d = df[yr .== y, :]
+        nrow(d) == 0 && continue
+        lines!(ax, Dates.dayofyear.(d.date), _tofloatvec(d[!, var]);
+               color = col, linewidth = 2, label = lbl)
+    end
+
+    if forecast && !offline_mode()
+        fc = forecast_daily(loc).table
+        x  = Dates.dayofyear.(fc.date)
+        band!(ax, x, _tofloatvec(fc.tmin), _tofloatvec(fc.tmax); color = (:black, 0.18))
+        lines!(ax, x, _tofloatvec(fc.tmean); color = :black, linewidth = 2.5,
+               label = "forecast")
+        scatter!(ax, x, _tofloatvec(fc.tmean); color = :black, markersize = 6)
+    end
+
+    axislegend(ax; position = :lt, framevisible = false)
+    return fig
+end
+
 """
     climate_projection(place; threshold, var, index, models, correct, ...) -> Figure
 

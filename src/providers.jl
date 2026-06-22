@@ -10,9 +10,10 @@
 # returning a `ClimateData` with the same column convention — nothing else in
 # the package needs to change.
 
-const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
-const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-const CLIMATE_URL = "https://climate-api.open-meteo.com/v1/climate"
+const GEOCODE_URL  = "https://geocoding-api.open-meteo.com/v1/search"
+const ARCHIVE_URL  = "https://archive-api.open-meteo.com/v1/archive"
+const CLIMATE_URL  = "https://climate-api.open-meteo.com/v1/climate"
+const FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 # Map ClimStats column names <-> Open-Meteo `daily` variable names.
 const DAILY_VARMAP = (
@@ -25,20 +26,61 @@ const DAILY_VARMAP = (
 "Default end date for ERA5 requests (the reanalysis lags real time by ~5 days)."
 default_stop() = Dates.today() - Dates.Day(7)
 
+# --- offline mode ----------------------------------------------------------
+# When enabled, ClimStats makes no network requests: every value must come from
+# the on-disk cache, and anything not cached (or inherently live, like the
+# forecast) is skipped by the caller. Toggle with the `CLIMSTATS_OFFLINE`
+# environment variable (read at load time, see `__init__`) or programmatically
+# with `set_offline!`; the high-level plotting helpers also take an `offline`
+# keyword.
+const _OFFLINE = Ref(false)
+
+struct OfflineError <: Exception
+    url::String
+end
+Base.showerror(io::IO, e::OfflineError) = print(io,
+    "ClimStats is offline; refusing to fetch ", e.url,
+    ". Use cached data only, or disable offline mode (set_offline!(false)).")
+
+"""
+    set_offline!(b::Bool) -> Bool
+
+Enable or disable offline mode (no network access; cached data only) and return
+the previous setting. Offline mode can also be turned on at load time by setting
+the `CLIMSTATS_OFFLINE` environment variable to `1`/`true`.
+"""
+set_offline!(b::Bool) = (old = _OFFLINE[]; _OFFLINE[] = b; old)
+
+"Whether ClimStats is currently in offline mode (see [`set_offline!`](@ref))."
+offline_mode() = _OFFLINE[]
+
 # --- low level HTTP --------------------------------------------------------
 
-function _get_json(url::AbstractString, query::AbstractDict)
-    resp = try
-        HTTP.get(url; query = query, status_exception = false, retry = true)
-    catch err
-        error("ClimStats could not reach $url. This package needs network " *
-              "access to download data. Underlying error: $err")
-    end
-    if resp.status != 200
+# Open-Meteo enforces separate per-minute, per-hour and per-day request limits.
+# The minutely cap is transient — it clears at the next clock minute — so on a
+# `429` whose reason names the *minutely* limit we pause and retry, bounded by
+# `minutely_retries`. The hourly/daily caps will not clear soon, so those (and
+# any other non-200) are surfaced immediately rather than blocking pointlessly.
+function _get_json(url::AbstractString, query::AbstractDict;
+                   minutely_retries::Integer = 5, retry_pause::Real = 65)
+    _OFFLINE[] && throw(OfflineError(url))
+    for attempt in 0:minutely_retries
+        resp = try
+            HTTP.get(url; query = query, status_exception = false, retry = true)
+        catch err
+            error("ClimStats could not reach $url. This package needs network " *
+                  "access to download data. Underlying error: $err")
+        end
+        resp.status == 200 && return JSON3.read(resp.body)
         body = String(resp.body)
+        if resp.status == 429 && occursin(r"minutely"i, body) && attempt < minutely_retries
+            @info "Open-Meteo minutely request limit hit; pausing $(retry_pause)s " *
+                  "before retry $(attempt + 1)/$(minutely_retries)" url
+            sleep(retry_pause)
+            continue
+        end
         error("Request to $url failed (HTTP $(resp.status)). Response: $body")
     end
-    return JSON3.read(resp.body)
 end
 
 # Open-Meteo sends `null` for gaps; JSON3 decodes that to `nothing`.
@@ -90,8 +132,31 @@ geocode("Berlin, Germany")
 geocode("Paris, France")
 geocode("Springfield, US")
 ```
+
+The resolved location is cached on disk (keyed by the query string), so a place
+looked up once is available later even in offline mode (pass `cache = false` to
+force a fresh lookup).
 """
-function geocode(place::AbstractString; results::Integer = 10, language = "en")
+function geocode(place::AbstractString; results::Integer = 10, language = "en",
+                 cache::Bool = true)
+    df = _geocode_cached(; place = String(strip(place)), results = Int(results),
+                         language = String(language), cached = cache)
+    r = df[1, :]
+    return Location(r.name, r.country, r.latitude, r.longitude, r.elevation)
+end
+
+# Cached geocode result, stored as a one-row DataFrame so it round-trips through
+# the same Arrow codec as the data caches. Network + disambiguation live in
+# `_geocode_live`; only the chosen location is persisted.
+@cached cachetype="climstats/geocode" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.place, a.results, a.language)) function _geocode_cached(; place, results, language)
+    loc = _geocode_live(place; results = results, language = language)
+    return DataFrame(name = [loc.name], country = [loc.country],
+                     latitude = [loc.latitude], longitude = [loc.longitude],
+                     elevation = [loc.elevation])
+end
+
+# The live geocoding request and match selection (no caching).
+function _geocode_live(place::AbstractString; results::Integer = 10, language = "en")
     parts = strip.(split(place, ","))
     query_name = String(parts[1])
     filt = length(parts) > 1 ? lowercase(String(parts[end])) : nothing
@@ -210,16 +275,62 @@ function era5_daily(loc::Location;
 
     df = _era5_stable(; lat, lon, through, _timezone = timezone, cached = cache)
     # Requests reaching before the cached epoch or past the stable boundary get
-    # those slivers fetched live and spliced on — they are never cached.
-    start < ERA5_EPOCH &&
-        (df = vcat(_fetch_era5_raw(lat, lon, allvars, start, ERA5_EPOCH - Day(1),
-                                   timezone), df))
-    stop > through &&
-        (df = vcat(df, _fetch_era5_raw(lat, lon, allvars, through + Day(1), stop,
-                                       timezone)))
+    # those slivers fetched live and spliced on — they are never cached. In
+    # offline mode the live splices are skipped: only the cached stable history
+    # is returned (clipped to the requested range below).
+    if !_OFFLINE[]
+        start < ERA5_EPOCH &&
+            (df = vcat(_fetch_era5_raw(lat, lon, allvars, start, ERA5_EPOCH - Day(1),
+                                       timezone), df))
+        stop > through &&
+            (df = vcat(df, _fetch_era5_raw(lat, lon, allvars, through + Day(1), stop,
+                                           timezone)))
+    end
 
     df = df[(df.date .>= start) .& (df.date .<= stop), :]
     return ClimateData(loc, "ERA5", select(df, :date, collect(vars)...))
+end
+
+# --- live forecast ---------------------------------------------------------
+
+"""
+    forecast_daily(place; days = 7, vars, timezone) -> ClimateData
+    forecast_daily(location::Location; days, vars, timezone) -> ClimateData
+
+Daily weather *forecast* for a location from the Open-Meteo forecast API, today
+through `days - 1` days ahead. Same column convention as [`era5_daily`](@ref)
+(`:date` plus the requested `:tmax`/`:tmin`/`:tmean`/`:precip`), so the index and
+plotting helpers apply unchanged. The `source` label is `"forecast"`.
+
+Unlike ERA5 and CMIP6 this is a small, fast-changing live request and is **not**
+cached on disk — each call fetches fresh, at the exact location (no grid snap).
+
+```julia
+fc = forecast_daily("Berlin, Germany"; days = 7)
+fc.table[fc.table.date .== Dates.today(), :]   # today's forecast row
+```
+"""
+forecast_daily(place::AbstractString; kwargs...) = forecast_daily(geocode(place); kwargs...)
+
+function forecast_daily(loc::Location;
+                        days::Integer = 7,
+                        vars = keys(DAILY_VARMAP),
+                        timezone = "auto")
+    for v in vars
+        haskey(DAILY_VARMAP, v) || error("Unknown variable :$v. Choose from " *
+                                         "$(collect(keys(DAILY_VARMAP))).")
+    end
+    json = _get_json(FORECAST_URL, Dict(
+        "latitude"      => string(loc.latitude),
+        "longitude"     => string(loc.longitude),
+        "daily"         => _daily_param(vars),
+        "forecast_days" => string(days),
+        "timezone"      => timezone,
+    ))
+    haskey(json, :daily) ||
+        error("Open-Meteo forecast returned no data for $loc.")
+    df = _build_table(json.daily)
+    return ClimateData(loc, "forecast", select(df, :date, collect(vars)...))
 end
 
 # --- CMIP6 (climate projections) -------------------------------------------

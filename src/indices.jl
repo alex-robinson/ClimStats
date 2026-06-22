@@ -105,6 +105,94 @@ function annual_sum(data::ClimateData; var::Symbol = :precip)
         :v => (x -> count(!ismissing, x)) => :n_days)
 end
 
+# --- climatological averages -----------------------------------------------
+
+# Restrict a daily (date, value) frame to an inclusive span of calendar years.
+# `period` is a `(first_year, last_year)` tuple, or `nothing` for the whole
+# record. Returns a view-free copy ready for aggregation.
+function _restrict_years(work::DataFrame, period)
+    period === nothing && return work
+    y = Dates.year.(work.date)
+    return work[(y .>= first(period)) .& (y .<= last(period)), :]
+end
+
+"""
+    daily_climatology(data; var = :tmean, window = 3, period = nothing) -> DataFrame
+
+Climatological average of `var` for each day of the year. For every day-of-year
+`d` (1…366) the mean is taken over every observation whose date falls within
+`±window` days of `d` — wrapping across the year boundary — across all years in
+`period`, an inclusive `(first_year, last_year)` tuple (or `nothing` for the
+whole record). The window smooths the otherwise noisy single-day average.
+Columns: `:doy`, `:mean`, `:n` (observations contributing to that day).
+
+```julia
+daily_climatology(data; var = :tmax, period = (1981, 2010))   # 30-yr normal
+```
+"""
+function daily_climatology(data::ClimateData; var::Symbol = :tmean,
+                           window::Integer = 3, period = nothing)
+    df = data.table
+    hasproperty(df, var) ||
+        error("Variable :$var not present. Available: $(variables(data)).")
+    work = _restrict_years(DataFrame(date = df.date, v = df[!, var]), period)
+    doy  = Dates.dayofyear.(work.date)
+    vals = work.v
+    means  = Vector{Union{Missing,Float64}}(missing, 366)
+    counts = zeros(Int, 366)
+    for d in 1:366
+        acc = 0.0; n = 0
+        for i in eachindex(vals)
+            vi = vals[i]
+            ismissing(vi) && continue
+            δ = abs(doy[i] - d)        # circular day-of-year distance (period 366)
+            δ = min(δ, 366 - δ)
+            δ <= window && (acc += vi; n += 1)
+        end
+        counts[d] = n
+        n == 0 || (means[d] = acc / n)
+    end
+    return DataFrame(doy = 1:366, mean = means, n = counts)
+end
+
+"""
+    monthly_climatology(data; var = :tmean, period = nothing) -> DataFrame
+
+Climatological average of `var` for each calendar month (1…12), pooled over all
+days in all years of `period` (an inclusive `(first_year, last_year)` tuple, or
+`nothing` for the whole record). Columns: `:month`, `:mean`, `:n`.
+"""
+function monthly_climatology(data::ClimateData; var::Symbol = :tmean, period = nothing)
+    df = data.table
+    hasproperty(df, var) ||
+        error("Variable :$var not present. Available: $(variables(data)).")
+    work = _restrict_years(DataFrame(date = df.date, v = df[!, var]), period)
+    work.month = Dates.month.(work.date)
+    g = combine(groupby(work, :month),
+        :v => (x -> (any(!ismissing, x) ? mean(skipmissing(x)) : missing)) => :mean,
+        :v => (x -> count(!ismissing, x)) => :n)
+    return sort!(g, :month)
+end
+
+"""
+    monthly_means(data; var = :tmean) -> DataFrame
+
+Mean of `var` for every (year, month) in the record — the per-year monthly means
+that [`monthly_climatology`](@ref) averages over. Columns: `:year`, `:month`,
+`:mean`, `:n_days`. Useful for plotting each year's seasonal cycle on its own.
+"""
+function monthly_means(data::ClimateData; var::Symbol = :tmean)
+    df = data.table
+    hasproperty(df, var) ||
+        error("Variable :$var not present. Available: $(variables(data)).")
+    work = DataFrame(year = Dates.year.(df.date), month = Dates.month.(df.date),
+                     v = df[!, var])
+    g = combine(groupby(work, [:year, :month]),
+        :v => (x -> (any(!ismissing, x) ? mean(skipmissing(x)) : missing)) => :mean,
+        :v => (x -> count(!ismissing, x)) => :n_days)
+    return sort!(g, [:year, :month])
+end
+
 """
     linear_trend(x, y) -> (; slope, intercept)
 

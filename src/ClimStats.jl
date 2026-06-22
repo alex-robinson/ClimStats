@@ -41,14 +41,17 @@ using JSON3
 using Makie
 
 export Location, ClimateData, geocode, table, variables
-export era5_daily, projection_daily, default_stop, PROJECTION_MODELS
+export era5_daily, projection_daily, forecast_daily, default_stop, PROJECTION_MODELS
+export set_offline!, offline_mode
 export annual_count, days_above, days_below, annual_mean, annual_sum, linear_trend
+export daily_climatology, monthly_climatology, monthly_means
 export hot_days, summer_days, frost_days, icing_days, tropical_nights, wet_days
 export BiasCorrection, QuantileCorrection, AbstractBiasCorrection
 export fit_bias_correction, apply_bias_correction, bias_correct, DEFAULT_REF
 export Ensemble, projection_ensemble, ensemble_summary, ensemble_index
 export CurrentYearEstimate, incomplete_final_year, complete_current_year, estimate_current_year
 export plot_index, plot_index!, plot_ensemble!, plot_nowcast!, climate_timeseries, climate_projection
+export climate_day_comparison, climate_monthly, climate_daily
 export save  # re-exported from Makie; load a backend (CairoMakie/GLMakie) to render
 export SSP_SCENARIOS, NEXGDDP_MODELS, NEXGDDP_DEFAULT_MODELS, nexgddp_model_spec
 export scenario_label, nexgddp_daily, ssp_ensemble, climate_ssp
@@ -62,5 +65,13 @@ include("ensemble.jl")
 include("nowcast.jl")
 include("plotting.jl")
 include("nexgddp.jl")
+
+# Offline mode can be switched on at load time via the environment, so a process
+# started with `CLIMSTATS_OFFLINE=1` never touches the network.
+function __init__()
+    _OFFLINE[] = lowercase(strip(get(ENV, "CLIMSTATS_OFFLINE", ""))) in
+                 ("1", "true", "yes", "on")
+    return nothing
+end
 
 end # module ClimStats
