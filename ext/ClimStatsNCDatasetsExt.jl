@@ -62,6 +62,11 @@ function _fetch_variable_full(lat, lon, scen, model, variant, grid, col)
         append!(dates, ds_dates)
         append!(vals, [ismissing(x) ? missing : conv(Float64(x)) for x in ds_vals])
     end
+    # Every year failed to load (e.g. a network/TLS failure to the OPeNDAP host,
+    # not a genuinely empty series) — error rather than return nothing, so the
+    # caching layer never persists a failed fetch as an empty "success".
+    isempty(dates) && error("NEX-GDDP returned no data for $model $col at " *
+                            "($lat, $lon); every year-file read failed.")
     df = DataFrame(date = dates)
     df[!, col] = vals
     unique!(df, :date)          # guard against any calendar-induced duplicates
