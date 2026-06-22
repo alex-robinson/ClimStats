@@ -1,0 +1,8 @@
+lat = 40.5
+lon = -3.75
+through = "2026-05-31"
+
+[_META]
+cachetype = "climstats/era5"
+hash = "117b9b7dc78f8e10855f97addcd3641e133d72e18bf51c406ce4c220eae9518a"
+schema = 1

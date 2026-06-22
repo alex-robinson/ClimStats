@@ -12,9 +12,11 @@ fig = climate_timeseries("Berlin, Germany"; threshold = 30)
 save("berlin_hot_days.png", fig)
 ```
 
-ERA5 history and the Open-Meteo CMIP6 ensemble are fetched live from the free,
-key-less Open-Meteo APIs on first use, then **cached on disk** so the same series
-is never re-downloaded (see [Caching](caching.md)). See the
+Historical data default to **NASA POWER** (keyless, no request quota); pass
+`source = :era5` for the Open-Meteo ERA5 archive instead. The CMIP6 ensemble is
+fetched from the key-less Open-Meteo climate API. Everything is **cached on disk**
+on first use so the same series is never re-downloaded (see [Caching](caching.md)),
+and the example locations ship with a bundled offline fixture cache. See the
 [README](https://github.com/alex-robinson/ClimStats) for the full tour — indices,
 bias correction, ensembles and SSP scenarios. These docs focus on **caching**,
 the **temperature climatology** figures, and the **current-year nowcast**.

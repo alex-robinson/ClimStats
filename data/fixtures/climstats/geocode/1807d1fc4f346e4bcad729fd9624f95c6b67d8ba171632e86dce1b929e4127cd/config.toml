@@ -1,0 +1,8 @@
+language = "en"
+place = "Madrid, Spain"
+results = 10
+
+[_META]
+cachetype = "climstats/geocode"
+hash = "1807d1fc4f346e4bcad729fd9624f95c6b67d8ba171632e86dce1b929e4127cd"
+schema = 1

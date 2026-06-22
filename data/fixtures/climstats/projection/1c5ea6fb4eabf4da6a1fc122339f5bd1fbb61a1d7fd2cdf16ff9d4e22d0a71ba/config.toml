@@ -1,0 +1,8 @@
+lat = 52.5
+lon = 13.5
+model = "CMCC_CM2_VHR4"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "1c5ea6fb4eabf4da6a1fc122339f5bd1fbb61a1d7fd2cdf16ff9d4e22d0a71ba"
+schema = 1

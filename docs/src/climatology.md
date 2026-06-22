@@ -65,7 +65,9 @@ fig = climate_daily("Berlin, Germany"; spaghetti = true)
 Every figure can be drawn from cached data alone — no network, with the live
 forecast omitted — by passing `offline = true` or setting the `CLIMSTATS_OFFLINE`
 environment variable. A location must have been fetched online at least once so
-its data (and geocoding) are on disk.
+its data (and geocoding) are on disk. The four bundled example locations
+(Berlin, Madrid, Athens, Fort Collins) come with a committed fixture cache, so
+they render offline out of the box — no prior fetch needed.
 
 ```julia
 fig = climate_daily("Berlin, Germany"; offline = true)   # cached data only

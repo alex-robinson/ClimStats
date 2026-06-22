@@ -1,0 +1,8 @@
+language = "en"
+place = "Fort Collins, Colorado"
+results = 10
+
+[_META]
+cachetype = "climstats/geocode"
+hash = "4b8cbb4af4d3541072967d6eb4d360fad8186e9f06f71c0d28fa719da14945ab"
+schema = 1

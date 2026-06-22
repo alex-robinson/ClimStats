@@ -1,0 +1,8 @@
+lat = 38.0
+lon = 23.75
+model = "MRI_AGCM3_2_S"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "6ee1ed24359f891bcffb5b23af810463b001b1e5606c8ec6eefa6dd0f2ecdef2"
+schema = 1

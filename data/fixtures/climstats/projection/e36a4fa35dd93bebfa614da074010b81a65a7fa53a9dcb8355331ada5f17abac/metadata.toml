@@ -1,0 +1,15 @@
+created = "2026-06-22T08:49:48Z"
+host = "Mac.fritz.box"
+tool = "DataManifest.jl 0.36.1"
+user = "alrobi001"
+
+[_META]
+schema = 1
+
+[git]
+branch = "feat/power-aws-fixtures"
+commit = "f4294bd"
+dirty = true
+
+[origin]
+state_file = "/Users/alrobi001/models/ClimStats/.datamanifest/state.toml"

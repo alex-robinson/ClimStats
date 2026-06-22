@@ -1,0 +1,15 @@
+created = "2026-06-21T14:06:07Z"
+host = "Mac.fritz.box"
+tool = "DataManifest.jl 0.36.1"
+user = "alrobi001"
+
+[_META]
+schema = 1
+
+[git]
+branch = "main"
+commit = "ac90869"
+dirty = true
+
+[origin]
+state_file = "/Users/alrobi001/models/ClimStats/.datamanifest/state.toml"

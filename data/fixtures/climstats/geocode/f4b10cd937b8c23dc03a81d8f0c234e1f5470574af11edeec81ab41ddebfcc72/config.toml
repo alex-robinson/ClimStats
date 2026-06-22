@@ -1,0 +1,8 @@
+language = "en"
+place = "Athens, Greece"
+results = 10
+
+[_META]
+cachetype = "climstats/geocode"
+hash = "f4b10cd937b8c23dc03a81d8f0c234e1f5470574af11edeec81ab41ddebfcc72"
+schema = 1

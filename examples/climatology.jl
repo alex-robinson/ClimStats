@@ -1,12 +1,17 @@
 # Climatological temperature figures for any location.
 #
+# History comes from NASA POWER by default (keyless, no request quota); the
+# future ensemble is the Open-Meteo CMIP6 climate API.
+#
 # Pass the location as a string argument (defaults to Berlin):
 #     julia --project=. -e 'import Pkg; Pkg.add("CairoMakie")'
 #     julia --project=. examples/climatology.jl "Paris, France"
-# (needs internet access to reach the Open-Meteo APIs).
+# (a new location needs internet for its first fetch).
 #
-# To plot from cached data only — no network calls, live forecast omitted —
-# set the offline flag (works for a location fetched online at least once):
+# The four bundled example locations — Berlin, Germany / Madrid, Spain /
+# Athens, Greece / Fort Collins, Colorado — ship with an offline fixture cache,
+# so they render with no network and no quota. Force offline mode (cached data
+# only, live forecast omitted) for any location fetched online at least once:
 #     CLIMSTATS_OFFLINE=1 julia --project=. examples/climatology.jl "Berlin, Germany"
 
 using ClimStats

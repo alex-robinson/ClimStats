@@ -1,0 +1,15 @@
+created = "2026-06-22T06:40:36Z"
+host = "vpn-172-26-3-72.awi.de"
+tool = "DataManifest.jl 0.36.1"
+user = "alrobi001"
+
+[_META]
+schema = 1
+
+[git]
+branch = "main"
+commit = "0cfa8ac"
+dirty = true
+
+[origin]
+state_file = "/Users/alrobi001/models/ClimStats/.datamanifest/state.toml"

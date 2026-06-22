@@ -88,29 +88,52 @@ That's enough to build a great many indices. Provided out of the box:
 
 ## How it works (data sources)
 
-This first version uses the free, **no-API-key** [Open-Meteo](https://open-meteo.com)
-HTTP APIs, which serve point time series directly (no need to download and crop
-gridded files):
+All providers serve point time series directly (no downloading and cropping
+gridded files) and need **no API key**:
 
-| Need                | Endpoint                            | Product            |
-|---------------------|-------------------------------------|--------------------|
-| place → coordinates | `geocoding-api.open-meteo.com`      | —                  |
-| past (ERA5)         | `archive-api.open-meteo.com`        | ERA5 / ERA5-Land   |
-| future (CMIP6)      | `climate-api.open-meteo.com`        | CMIP6 (downscaled) |
+| Need                | Provider / function          | Source                                  | Quota |
+|---------------------|------------------------------|-----------------------------------------|-------|
+| place → coordinates | `geocode`                    | Open-Meteo geocoding                    | yes   |
+| **past (default)**  | `history_daily` → `power_daily` | **NASA POWER** (MERRA-2, 1981→present, ~0.5°) | **none** |
+| past (alternative)  | `history_daily(…; source=:era5)` → `era5_daily` | Open-Meteo ERA5 / ERA5-Land archive (1940/1950→present, 0.25°) | yes |
+| future (CMIP6)      | `projection_daily`           | Open-Meteo CMIP6 (downscaled, to 2050)  | yes   |
+| future (SSP)        | `nexgddp_daily` / `ssp_ensemble` / `climate_ssp` | NASA NEX-GDDP-CMIP6 (to 2100) | none  |
 
-> **Network access is required for the *first* fetch of a location.** Data are
-> fetched live, then cached on disk so the same series is not downloaded again —
-> see [Caching](#caching-fetch-once-reuse-everywhere).
+**Why NASA POWER is the default history source.** The Open-Meteo APIs are the
+easiest entry point but enforce per-minute / per-hour / per-day request limits
+that bite quickly during development and testing. NASA POWER is equally keyless
+but has no hard quota, so the high-level climatology figures
+(`climate_day_comparison`, `climate_monthly`, `climate_daily`) and `climate_ssp`
+take their historical baseline from POWER by default. Pass `source = :era5` to
+any of them for the longer, higher-resolution ERA5 record (`climate_timeseries`
+and `climate_projection`, the long-record warming figures, stay on ERA5).
+
+**NEX-GDDP backends.** The SSP projections read NetCDF point series from the
+NASA NEX-GDDP-CMIP6 archive. The default `backend = :aws` reads the keyless
+[AWS Open Data](https://registry.opendata.aws/nex-gddp-cmip6/) S3 mirror over
+HTTP byte-range (reachable where the NCCS OPeNDAP host is blocked); `backend =
+:nccs` is the original NASA NCCS OPeNDAP server. The data is identical, so a
+cell cached from one backend is reused by the other. (Requires `using
+NCDatasets`; on first use ClimStats points NetCDF's libcurl at Julia's CA roots
+so HTTPS reads work out of the box — see `ext/ClimStatsNCDatasetsExt.jl`.)
+
+> **Network is required for the *first* fetch of a location**, then data are
+> cached on disk (see [Caching](#caching-fetch-once-reuse-everywhere)). The four
+> example locations (Berlin, Madrid, Athens, Fort Collins) ship with a
+> **bundled offline fixture cache** (`data/fixtures/`), so their figures render
+> with no network and no quota — see
+> [`scripts/generate_fixtures.jl`](scripts/generate_fixtures.jl).
 
 ### Why not the Copernicus CDS directly?
 
 Native ERA5 from the Copernicus Climate Data Store requires an account, an API
 key, accepting a licence, and downloading large gridded NetCDF/GRIB files that
 you then crop to a point. For "give me one location's daily series" that is a lot
-of overhead. ClimStats therefore starts with Open-Meteo's ERA5 archive, but the
-provider layer is deliberately thin and isolated (`src/providers.jl`): a future
-CDS-backed downloader only has to return a `ClimateData` using the same column
-convention, and every index/plot helper keeps working unchanged.
+of overhead. ClimStats therefore reaches ERA5 through Open-Meteo's archive, but
+the provider layer is deliberately thin and isolated (`src/providers.jl`): a
+new backend (NASA POWER was added exactly this way) only has to return a
+`ClimateData` using the same column convention, and every index/plot helper
+keeps working unchanged.
 
 ## Caching (fetch once, reuse everywhere)
 

@@ -1,0 +1,8 @@
+lat = 52.5
+lon = 13.5
+model = "NICAM16_8S"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "f7f4ed51a7b14597d4337a80a7cfb57b09b838517586e3d26ee9ea3bf02180f5"
+schema = 1

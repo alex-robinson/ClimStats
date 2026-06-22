@@ -1,0 +1,8 @@
+lat = 38.0
+lon = 23.75
+model = "EC_Earth3P_HR"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "3cf78b4e9b7c16bd0208176bb79402d88140cc8c947c41f376959434b8aa3ec2"
+schema = 1

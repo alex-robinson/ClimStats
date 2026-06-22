@@ -1,0 +1,8 @@
+language = "en"
+place = "Berlin, Germany"
+results = 10
+
+[_META]
+cachetype = "climstats/geocode"
+hash = "7708a35e57413de95302902807b3886a54f9d0aaec230592e2070209edbdf8f3"
+schema = 1
