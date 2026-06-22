@@ -1,3 +1,9 @@
+```@raw html
+<p align="center">
+  <img src="assets/logo.svg" alt="ClimStats logo" width="160" height="160">
+</p>
+```
+
 # ClimStats
 
 A Julia package for retrieving climate data for a single location and computing

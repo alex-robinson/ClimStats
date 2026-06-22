@@ -11,6 +11,9 @@ makedocs(;
         prettyurls = get(ENV, "CI", "false") == "true",
         canonical = "https://alex-robinson.github.io/ClimStats",
         edit_link = "main",
+        # `logo.svg` is auto-detected for the sidebar; the `.ico` asset sets the
+        # browser favicon (a simplified version of the same warming-stripes mark).
+        assets = ["assets/favicon.ico"],
     ),
     pages = [
         "Home" => "index.md",
