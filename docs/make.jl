@@ -13,6 +13,7 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Caching" => "caching.md",
+        "Climatology" => "climatology.md",
         "Current-year nowcast" => "nowcast.md",
     ],
     # These docs are scoped to the nowcast, so docstrings here cross-reference

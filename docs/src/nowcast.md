@@ -11,12 +11,12 @@ lighter diamond with a lo–hi error bar, distinct from the solid observed histo
 
 ## The two figures
 
-The script [`examples/berlin_nowcast.jl`](https://github.com/alex-robinson/ClimStats/blob/main/examples/berlin_nowcast.jl)
-renders both figures below. Run it from the package root with a Makie backend and
-internet access:
+The general script [`examples/nowcast.jl`](https://github.com/alex-robinson/ClimStats/blob/main/examples/nowcast.jl)
+renders both figures below for any location (defaulting to Berlin). Run it from
+the package root with a Makie backend and internet access:
 
 ```julia
-julia --project=docs examples/berlin_nowcast.jl
+julia --project=docs examples/nowcast.jl "Berlin, Germany"
 ```
 
 ### History + current-year estimate
@@ -47,7 +47,7 @@ fig = climate_projection("Berlin, Germany"; threshold = 30,
 ```
 
 !!! note "Figure"
-    Run [`examples/berlin_nowcast.jl`](https://github.com/alex-robinson/ClimStats/blob/main/examples/berlin_nowcast.jl)
+    Run [`examples/nowcast.jl`](https://github.com/alex-robinson/ClimStats/blob/main/examples/nowcast.jl)
     to render this combined past+future figure (it needs live Open-Meteo access
     for the CMIP6 ensemble, so it is not embedded here).
 
