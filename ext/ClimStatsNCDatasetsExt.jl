@@ -13,18 +13,56 @@ module ClimStatsNCDatasetsExt
 
 using ClimStats
 using ClimStats: Location, ClimateData, geocode,
-    NEXGDDP_BASE, NEXGDDP_VARMAP, nexgddp_model_spec, _normalize_scenario,
+    NEXGDDP_VARMAP, nexgddp_model_spec, _normalize_scenario,
     _scenario_for_year, _nexgddp_url, NEXGDDP_START, NEXGDDP_STOP,
+    nexgddp_backend_spec, NEXGDDP_DEFAULT_BACKEND,
     _snap, _arrow_save, _arrow_load
 using DataManifest: @cached
 using NCDatasets
 using DataFrames
 using Dates
+import NetworkOptions
+
+# Configure NetCDF's libcurl for remote HTTPS reads (AWS byte-range and NCCS
+# OPeNDAP). Two problems it fixes, both via NetCDF's rc file:
+#   * NetCDF_jll's libcurl does not honour CURL_CA_BUNDLE and ships without a
+#     usable CA bundle on some platforms (notably macOS), so reads fail with
+#     "unable to get local issuer certificate" — we pin `HTTP.SSL.CAINFO` to
+#     Julia's CA roots.
+#   * Single S3 files involve many small HDF5 byte-range requests, which can blow
+#     past libcurl's default ~100s transfer timeout — we raise `HTTP.TIMEOUT`.
+# We respect any existing setup: an explicit `NCRCENV_RC`, or a `~/.ncrc` that
+# already pins `HTTP.SSL.CAINFO`, is left untouched; otherwise we write a managed
+# rc (merging an existing `~/.ncrc`) and select it via `NCRCENV_RC`.
+const _RC_CONFIGURED = Ref(false)
+function _ensure_netcdf_rc!()
+    _RC_CONFIGURED[] && return nothing
+    _RC_CONFIGURED[] = true
+    haskey(ENV, "NCRCENV_RC") && return nothing       # user controls the rc file
+    ca = NetworkOptions.ca_roots_path()
+    (ca === nothing || !isfile(ca)) && return nothing
+    home_rc = joinpath(homedir(), ".ncrc")
+    existing = isfile(home_rc) ? read(home_rc, String) : ""
+    occursin(r"HTTP\.SSL\.CAINFO"i, existing) && return nothing   # already pinned
+    rc = joinpath(tempdir(), "climstats.ncrc")
+    open(rc, "w") do io
+        if !isempty(existing)
+            print(io, existing)
+            endswith(existing, "\n") || println(io)
+        end
+        println(io, "HTTP.SSL.CAINFO=", ca)
+        println(io, "HTTP.TIMEOUT=300")
+        println(io, "HTTP.CONNECTTIMEOUT=30")
+    end
+    ENV["NCRCENV_RC"] = rc
+    return nothing
+end
 
 # Read one grid-cell, one-year time series from a single NEX-GDDP file.
 # Returns (dates, values) in native units. Subsetting happens lazily over
 # OPeNDAP, so only the cell is transferred, not the global field.
 function _read_point_year(url, nexvar, lat, lon)
+    _ensure_netcdf_rc!()
     return NCDataset(url) do ds
         lats = ds["lat"][:]
         lons = ds["lon"][:]
@@ -44,13 +82,14 @@ end
 # Assemble one variable across the full archive span into a (date, col)
 # DataFrame, applying the unit conversion and skipping years that fail to load.
 # This is all of the network work; the caching wrapper below addresses it.
-function _fetch_variable_full(lat, lon, scen, model, variant, grid, col)
+# `base`/`bytes` come from the chosen backend (`nexgddp_backend_spec`).
+function _fetch_variable_full(lat, lon, scen, model, variant, grid, col, base, bytes)
     nexvar, conv = NEXGDDP_VARMAP[col]
     dates = Date[]
     vals = Union{Missing,Float64}[]
     for year in Dates.year(NEXGDDP_START):Dates.year(NEXGDDP_STOP)
         yscen = _scenario_for_year(year, scen)
-        url = _nexgddp_url(NEXGDDP_BASE, model, yscen, variant, grid, nexvar, year)
+        url = _nexgddp_url(base, model, yscen, variant, grid, nexvar, year; bytes = bytes)
         local res
         try
             res = _read_point_year(url, nexvar, lat, lon)
@@ -77,8 +116,10 @@ end
 # One full-span variable per cell, content-addressed and stored as Arrow. The
 # archive never changes, so there is no stable/tail split (unlike ERA5): one
 # entry per (model, scenario, variant, grid, var, cell) serves every date range.
-@cached cachetype="climstats/nexgddp" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.model, scenario=string(a.scenario), a.variant, a.grid, var=string(a.var), a.lat, a.lon)) function _nexgddp_var_cached(; model, scenario, variant, grid, var, lat, lon)
-    return _fetch_variable_full(lat, lon, scenario, model, variant, grid, var)
+# `base`/`bytes` (the backend) are deliberately absent from the key: AWS and NCCS
+# serve identical files, so a cell cached from one backend is reused by the other.
+@cached cachetype="climstats/nexgddp" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.model, scenario=string(a.scenario), a.variant, a.grid, var=string(a.var), a.lat, a.lon)) function _nexgddp_var_cached(; model, scenario, variant, grid, var, lat, lon, base, bytes)
+    return _fetch_variable_full(lat, lon, scenario, model, variant, grid, var, base, bytes)
 end
 
 function ClimStats.nexgddp_daily(loc::Location;
@@ -86,6 +127,7 @@ function ClimStats.nexgddp_daily(loc::Location;
                                  model::AbstractString = "ACCESS-CM2",
                                  variant = nothing,
                                  grid = nothing,
+                                 backend::Symbol = NEXGDDP_DEFAULT_BACKEND,
                                  start::Date = NEXGDDP_START,
                                  stop::Date = NEXGDDP_STOP,
                                  vars = keys(NEXGDDP_VARMAP),
@@ -93,6 +135,7 @@ function ClimStats.nexgddp_daily(loc::Location;
     start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
     scen = _normalize_scenario(scenario)
     v, g = nexgddp_model_spec(model; variant = variant, grid = grid)
+    base, bytes = nexgddp_backend_spec(backend)
     lat = _snap(loc.latitude)
     lon = _snap(loc.longitude)
 
@@ -101,7 +144,7 @@ function ClimStats.nexgddp_daily(loc::Location;
         haskey(NEXGDDP_VARMAP, col) ||
             error("Unknown variable :$col. Choose from $(keys(NEXGDDP_VARMAP)).")
         full = _nexgddp_var_cached(; model, scenario = scen, variant = v, grid = g,
-                                   var = col, lat, lon, cached = cache)
+                                   var = col, lat, lon, base, bytes, cached = cache)
         push!(perdf, full[(full.date .>= start) .& (full.date .<= stop), :])
     end
     isempty(perdf) && error("No variables requested.")

@@ -7,7 +7,8 @@ using Makie
 using Statistics
 using Test
 using ClimStats: _eprob, _quantile_sorted,
-    _normalize_scenario, _scenario_for_year, _nexgddp_url, NEXGDDP_VARMAP, NEXGDDP_BASE
+    _normalize_scenario, _scenario_for_year, _nexgddp_url, NEXGDDP_VARMAP,
+    NEXGDDP_NCCS_BASE, NEXGDDP_AWS_BASE, nexgddp_backend_spec
 
 # Build a synthetic two-year dataset we can reason about exactly.
 function synthetic_data()
@@ -343,11 +344,20 @@ end
     @test NEXGDDP_VARMAP.tmax[2](273.15) ≈ 0.0
     @test NEXGDDP_VARMAP.precip[2](1.0) ≈ 86400.0
 
-    # OPeNDAP URL construction
-    url = _nexgddp_url(NEXGDDP_BASE, "ACCESS-CM2", "ssp245",
+    # URL construction: the shared key/path layout
+    rel = "ACCESS-CM2/ssp245/r1i1p1f1/tasmax/tasmax_day_ACCESS-CM2_ssp245_r1i1p1f1_gn_2050.nc"
+    url = _nexgddp_url(NEXGDDP_NCCS_BASE, "ACCESS-CM2", "ssp245",
                        "r1i1p1f1", "gn", "tasmax", 2050)
-    @test endswith(url,
-        "ACCESS-CM2/ssp245/r1i1p1f1/tasmax/tasmax_day_ACCESS-CM2_ssp245_r1i1p1f1_gn_2050.nc")
+    @test endswith(url, rel)
+
+    # backend resolution: NCCS is plain OPeNDAP, AWS S3 needs the byte-range marker
+    @test nexgddp_backend_spec(:nccs) == (NEXGDDP_NCCS_BASE, false)
+    @test nexgddp_backend_spec(:aws)  == (NEXGDDP_AWS_BASE, true)
+    @test_throws ArgumentError nexgddp_backend_spec(:gcs)
+    aws = _nexgddp_url(NEXGDDP_AWS_BASE, "ACCESS-CM2", "ssp245",
+                       "r1i1p1f1", "gn", "tasmax", 2050; bytes = true)
+    @test endswith(aws, rel * "#mode=bytes")
+    @test startswith(aws, "https://nex-gddp-cmip6.s3.")
 
     # without NCDatasets loaded, the backend errors helpfully (not a MethodError)
     loc = Location("T", "N", 52.5, 13.4, 0.0)
