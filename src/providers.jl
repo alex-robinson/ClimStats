@@ -291,6 +291,169 @@ function era5_daily(loc::Location;
     return ClimateData(loc, "ERA5", select(df, :date, collect(vars)...))
 end
 
+# --- NASA POWER (historical reanalysis; keyless, no quota) -----------------
+#
+# NASA POWER serves daily MERRA-2-based meteorology with no API key and no hard
+# request quota (usage is monitored, not rate-limited), which is why it is the
+# *default* history source — see [`history_daily`]. It is the easy-access
+# alternative to the rate-limited Open-Meteo archive ([`era5_daily`]).
+#
+# Trade-offs versus ERA5: coverage starts 1981-01-01 (MERRA-2's epoch) on a
+# coarser ~0.5° lat × 0.625° lon grid; requests reaching before the epoch are
+# clamped to it rather than erroring. Same column convention and the same
+# stable-history-plus-live-tail caching as `era5_daily`, so every downstream
+# index and plotting helper works on the result unchanged.
+
+const POWER_URL = "https://power.larc.nasa.gov/api/temporal/daily/point"
+
+"ClimStats column => NASA POWER daily parameter (already in °C / mm-day)."
+const POWER_VARMAP = (
+    tmax   = "T2M_MAX",
+    tmin   = "T2M_MIN",
+    tmean  = "T2M",
+    precip = "PRECTOTCORR",   # bias-corrected total precipitation
+)
+
+"First day of NASA POWER daily coverage (MERRA-2 begins 1981-01-01)."
+const POWER_EPOCH = Date(1981, 1, 1)
+
+# POWER's native grid is ~0.5° lat × 0.625° lon (MERRA-2); snap to it so nearby
+# queries collapse onto one cached download (as `_snap` does for the 0.25° grids).
+_snap_power_lat(x) = _snap(x; res = 0.5)
+_snap_power_lon(x) = _snap(x; res = 0.625)
+
+# POWER marks gaps with the fill value -999; turn those (and JSON null) into missing.
+_power_tofloat(x) = (x === nothing || x <= -999.0) ? missing : Float64(x)
+
+"Build the standard daily table from a NASA POWER `properties.parameter` object."
+function _build_power_table(parameter, vars)
+    present = [v for v in vars if haskey(parameter, Symbol(POWER_VARMAP[v]))]
+    isempty(present) &&
+        error("NASA POWER response carried none of the requested parameters.")
+    # Every parameter shares the same set of date keys ("YYYYMMDD"); take and
+    # sort them once so the assembled series is chronological.
+    datekeys = sort!(collect(keys(parameter[Symbol(POWER_VARMAP[present[1]])])))
+    df = DataFrame(date = [Date(string(k), dateformat"yyyymmdd") for k in datekeys])
+    for v in present
+        p = parameter[Symbol(POWER_VARMAP[v])]
+        df[!, v] = Vector{Union{Missing,Float64}}([_power_tofloat(p[k]) for k in datekeys])
+    end
+    return df
+end
+
+# Raw NASA POWER fetch for one cell: all of the network work, no caching.
+function _fetch_power_raw(lat, lon, vars, start::Date, stop::Date, time_standard)
+    json = _get_json(POWER_URL, Dict(
+        "parameters"    => join([POWER_VARMAP[v] for v in vars], ","),
+        "community"     => "AG",
+        "latitude"      => string(lat),
+        "longitude"     => string(lon),
+        "start"         => Dates.format(start, dateformat"yyyymmdd"),
+        "end"           => Dates.format(stop, dateformat"yyyymmdd"),
+        "time-standard" => time_standard,
+        "format"        => "JSON",
+    ))
+    (haskey(json, :properties) && haskey(json.properties, :parameter)) ||
+        error("NASA POWER returned no data for ($lat, $lon).")
+    return _build_power_table(json.properties.parameter, vars)
+end
+
+# Stable history [POWER_EPOCH, through], content-addressed and stored as Arrow —
+# the mirror of `_era5_stable`. Always all four variables; `through` rolls once a
+# month so the cache gains newly-finalised days. `_time_standard` is excluded
+# from the hash (the `_` prefix convention).
+@cached cachetype="climstats/power" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.lat, a.lon, through = string(a.through))) function _power_stable(; lat, lon, through::Date, _time_standard = "LST")
+    return _fetch_power_raw(lat, lon, collect(keys(POWER_VARMAP)),
+                            POWER_EPOCH, through, _time_standard)
+end
+
+"""
+    power_daily(place; kwargs...) -> ClimateData
+    power_daily(location::Location; start, stop, vars, time_standard, cache) -> ClimateData
+
+Download daily NASA POWER reanalysis for a single location. A place string is
+geocoded automatically. Keyless and effectively quota-free, so this is the
+default backend behind [`history_daily`].
+
+```julia
+data = power_daily("Berlin, Germany")
+data = power_daily("Berlin, Germany"; start = Date(1990,1,1), stop = Date(2024,12,31))
+```
+
+Keyword arguments
+- `start::Date`        : first day (default `1981-01-01`, POWER's epoch). Earlier
+  dates are clamped to the epoch — for 1950-onwards history use
+  [`era5_daily`](@ref) (`history_daily(...; source = :era5)`).
+- `stop::Date`         : last day (default ≈ today − 7 days).
+- `vars`               : variables to return (default all of
+  `(:tmax, :tmin, :tmean, :precip)`).
+- `time_standard`      : `"LST"` (local solar time, default) or `"UTC"` day boundary.
+- `cache::Bool`        : reuse the on-disk copy (default `true`).
+
+Caching mirrors [`era5_daily`](@ref): the point is snapped to POWER's ~0.5° grid
+and the stable history is stored once per cell as Arrow; only the recent tail is
+fetched live and the stable cache rolls forward once a month.
+"""
+power_daily(place::AbstractString; kwargs...) = power_daily(geocode(place); kwargs...)
+
+function power_daily(loc::Location;
+                     start::Date = POWER_EPOCH,
+                     stop::Date  = default_stop(),
+                     vars = keys(POWER_VARMAP),
+                     time_standard::AbstractString = "LST",
+                     cache::Bool = true)
+    start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
+    for v in vars
+        haskey(POWER_VARMAP, v) || error("Unknown variable :$v. Choose from " *
+                                         "$(collect(keys(POWER_VARMAP))).")
+    end
+    # POWER coverage starts at the epoch; clamp silently (callers may ask for the
+    # ERA5 default of 1950 — `source = :power` accepts the shorter record).
+    start = max(start, POWER_EPOCH)
+    stop  = max(stop,  POWER_EPOCH)
+    lat = _snap_power_lat(loc.latitude)
+    lon = _snap_power_lon(loc.longitude)
+    through = _last_complete_month_end(default_stop())
+    allvars = collect(keys(POWER_VARMAP))
+
+    df = _power_stable(; lat, lon, through, _time_standard = time_standard, cached = cache)
+    # Recent tail past the stable boundary is fetched live and spliced on (never
+    # cached); skipped in offline mode, like the ERA5 tail.
+    if !_OFFLINE[]
+        stop > through &&
+            (df = vcat(df, _fetch_power_raw(lat, lon, allvars, through + Day(1), stop,
+                                            time_standard)))
+    end
+
+    df = df[(df.date .>= start) .& (df.date .<= stop), :]
+    return ClimateData(loc, "NASA POWER", select(df, :date, collect(vars)...))
+end
+
+# --- history provider selector ---------------------------------------------
+
+"""
+    history_daily(place; source = :power, kwargs...) -> ClimateData
+
+Daily historical series from the default history provider. `source` picks the
+backend:
+- `:power` — NASA POWER (keyless, no request quota; 1981→present, ~0.5° grid).
+  **Default.**
+- `:era5`  — Open-Meteo ERA5 archive (1950→present, 0.25° grid; subject to the
+  Open-Meteo request quota).
+
+Remaining `kwargs` (`start`, `stop`, `vars`, `cache`, …) are forwarded to the
+chosen provider ([`power_daily`](@ref) / [`era5_daily`](@ref)). The returned
+[`ClimateData`](@ref) has the same columns either way, so every index and
+plotting helper works on it unchanged. The high-level climatology and SSP figures
+(`climate_day_comparison`, `climate_monthly`, `climate_daily`, `climate_ssp`)
+route their history through this selector and default to `:power`.
+"""
+function history_daily(place; source::Symbol = :power, kwargs...)
+    source === :power && return power_daily(place; kwargs...)
+    source === :era5  && return era5_daily(place; kwargs...)
+    throw(ArgumentError("Unknown history `source` $(repr(source)); choose :power or :era5."))
+end
+
 # --- live forecast ---------------------------------------------------------
 
 """
