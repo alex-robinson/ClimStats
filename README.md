@@ -125,6 +125,7 @@ What gets cached, and how it is keyed:
 | layer                     | function(s)                                   | keyed by |
 |---------------------------|-----------------------------------------------|----------|
 | ERA5 point series         | `era5_daily`                                  | snapped cell + stable month |
+| CMIP6 projection series   | `projection_daily`                            | snapped cell + model |
 | NEX-GDDP point series     | `nexgddp_daily`                               | snapped cell + model/scenario/variant/grid/variable |
 | bias-corrected series     | `bias_correct`                                | content of both inputs + fit parameters |
 | nowcast analog completions| `complete_current_year`, `estimate_current_year` | content of `data` + analog settings |

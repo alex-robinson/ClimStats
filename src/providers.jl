@@ -47,12 +47,20 @@ _tofloat(x) = x === nothing ? missing : Float64(x)
 "Build the standard daily DataFrame from an Open-Meteo `daily` JSON object."
 function _build_table(daily)
     haskey(daily, :time) || error("Unexpected response: no `daily.time` field.")
-    df = DataFrame(date = Date.(String.(daily.time)))
+    times = String.(daily.time)
+    # The Open-Meteo climate (CMIP6) API can return a `time` axis one element
+    # longer than the data arrays; align everything to the shortest common length
+    # so the columns stay consistent (a no-op when lengths already match).
+    n = length(times)
+    for (_, omname) in pairs(DAILY_VARMAP)
+        key = Symbol(omname)
+        haskey(daily, key) && (n = min(n, length(daily[key])))
+    end
+    df = DataFrame(date = Date.(times[1:n]))
     for (col, omname) in pairs(DAILY_VARMAP)
         key = Symbol(omname)
-        if haskey(daily, key)
-            df[!, col] = Vector{Union{Missing,Float64}}(_tofloat.(daily[key]))
-        end
+        haskey(daily, key) || continue
+        df[!, col] = Vector{Union{Missing,Float64}}(_tofloat.(daily[key])[1:n])
     end
     return df
 end
@@ -231,9 +239,11 @@ const PROJECTION_MODELS = [
 
 """
     projection_daily(place; kwargs...) -> ClimateData
-    projection_daily(location::Location; model, start, stop, vars, timezone)
+    projection_daily(location::Location; model, start, stop, vars, timezone, cache)
 
 Download daily CMIP6 climate-projection data for a single location (1950–2050).
+The full fixed span is cached on disk per model and grid cell (pass
+`cache = false` to re-download), so repeated calls are served locally.
 Same return type and column convention as [`era5_daily`](@ref), so all of the
 index and plotting helpers apply directly.
 
@@ -246,22 +256,50 @@ See [`PROJECTION_MODELS`](@ref) for available `model` names.
 projection_daily(place::AbstractString; kwargs...) =
     projection_daily(geocode(place); kwargs...)
 
-function projection_daily(loc::Location;
-                          model::AbstractString = "MRI_AGCM3_2_S",
-                          start::Date = Date(1950, 1, 1),
-                          stop::Date  = Date(2050, 12, 31),
-                          vars = keys(DAILY_VARMAP),
-                          timezone = "auto")
-    start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
+"Fixed span of the Open-Meteo CMIP6 projection (1950 history → 2050 projection)."
+const PROJECTION_EPOCH = Date(1950, 1, 1)
+const PROJECTION_STOP  = Date(2050, 12, 31)
+
+# Raw Open-Meteo climate-API fetch for one model/cell: all the network work.
+function _fetch_projection_raw(model, lat, lon, vars, start::Date, stop::Date, timezone)
     json = _get_json(CLIMATE_URL, Dict(
-        "latitude"   => string(loc.latitude),
-        "longitude"  => string(loc.longitude),
+        "latitude"   => string(lat),
+        "longitude"  => string(lon),
         "start_date" => string(start),
         "end_date"   => string(stop),
         "models"     => model,
         "daily"      => _daily_param(vars),
         "timezone"   => timezone,
     ))
-    haskey(json, :daily) || error("Open-Meteo climate API returned no data for $loc.")
-    return ClimateData(loc, model, _build_table(json.daily))
+    haskey(json, :daily) ||
+        error("Open-Meteo climate API returned no data for ($lat, $lon).")
+    return _build_table(json.daily)
+end
+
+# Cached full-span projection per (model, snapped cell). The CMIP6 projection is
+# a fixed 1950–2050 series (it does not update over time), so — like NEX-GDDP and
+# unlike ERA5 — there is no live tail: one fetch per model/cell serves every
+# requested date range and variable subset.
+@cached cachetype="climstats/projection" ext="arrow" saver=_arrow_save loader=_arrow_load key=(a -> (; a.model, a.lat, a.lon)) function _projection_full(; model, lat, lon, _timezone = "auto")
+    return _fetch_projection_raw(model, lat, lon, collect(keys(DAILY_VARMAP)),
+                                 PROJECTION_EPOCH, PROJECTION_STOP, _timezone)
+end
+
+function projection_daily(loc::Location;
+                          model::AbstractString = "MRI_AGCM3_2_S",
+                          start::Date = PROJECTION_EPOCH,
+                          stop::Date  = PROJECTION_STOP,
+                          vars = keys(DAILY_VARMAP),
+                          timezone = "auto",
+                          cache::Bool = true)
+    start <= stop || error("`start` ($start) must not be after `stop` ($stop).")
+    for v in vars
+        haskey(DAILY_VARMAP, v) || error("Unknown variable :$v. Choose from " *
+                                         "$(collect(keys(DAILY_VARMAP))).")
+    end
+    lat = _snap(loc.latitude)
+    lon = _snap(loc.longitude)
+    df = _projection_full(; model, lat, lon, _timezone = timezone, cached = cache)
+    df = df[(df.date .>= start) .& (df.date .<= stop), :]
+    return ClimateData(loc, model, select(df, :date, collect(vars)...))
 end

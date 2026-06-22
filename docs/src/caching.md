@@ -16,6 +16,7 @@ Python or JavaScript front-end.
 | Layer                      | Function(s)                                        | Keyed by |
 |----------------------------|----------------------------------------------------|----------|
 | ERA5 point series          | [`era5_daily`](@ref)                               | snapped cell + stable month |
+| CMIP6 projection series    | [`projection_daily`](@ref)                         | snapped cell + model |
 | NEX-GDDP point series      | [`nexgddp_daily`](@ref)                            | snapped cell + model/scenario/variant/grid/variable |
 | Bias-corrected series      | [`bias_correct`](@ref)                             | content of both inputs + fit parameters |
 | Nowcast analog completions | [`complete_current_year`](@ref), [`estimate_current_year`](@ref) | content of `data` + analog settings |
@@ -74,6 +75,7 @@ persistent volume so every instance reuses a single cache.
 
 ```@docs
 era5_daily
+projection_daily
 nexgddp_daily
 bias_correct
 ```
