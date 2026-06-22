@@ -12,8 +12,38 @@
 # package extension `ext/ClimStatsNCDatasetsExt.jl`, loaded by `using NCDatasets`,
 # so the heavy NetCDF/HDF5 stack stays out of the core ERA5 path.
 
-"OPeNDAP root for the NASA NCCS NEX-GDDP-CMIP6 archive."
-const NEXGDDP_BASE = "https://ds.nccs.nasa.gov/thredds/dodsC/AMES/NEX/GDDP-CMIP6"
+"OPeNDAP root for the NASA NCCS NEX-GDDP-CMIP6 archive (the `:nccs` backend)."
+const NEXGDDP_NCCS_BASE = "https://ds.nccs.nasa.gov/thredds/dodsC/AMES/NEX/GDDP-CMIP6"
+
+"""
+S3 root for the AWS Open Data mirror of NEX-GDDP-CMIP6 (the `:aws` backend).
+
+The same NetCDF files as NCCS, served keyless from a public bucket. S3 has no
+OPeNDAP server, so a single grid cell is pulled with HTTP byte-range reads
+(`#mode=bytes`) rather than DAP subsetting. This backend is reachable from
+networks where the NCCS OPeNDAP host is blocked.
+"""
+const NEXGDDP_AWS_BASE = "https://nex-gddp-cmip6.s3.us-west-2.amazonaws.com/NEX-GDDP-CMIP6"
+
+"Available NEX-GDDP read backends (see [`nexgddp_backend_spec`](@ref))."
+const NEXGDDP_BACKENDS = (:aws, :nccs)
+
+"Default NEX-GDDP backend: the keyless AWS Open Data S3 mirror."
+const NEXGDDP_DEFAULT_BACKEND = :aws
+
+"""
+    nexgddp_backend_spec(backend) -> (base_url, append_bytes)
+
+Resolve a NEX-GDDP `backend` (`:aws` or `:nccs`) to its archive root URL and
+whether file URLs need the NetCDF byte-range marker `#mode=bytes` — required for
+the plain-HTTP S3 objects, but not for the NCCS OPeNDAP server.
+"""
+function nexgddp_backend_spec(backend::Symbol)
+    backend === :aws  && return (NEXGDDP_AWS_BASE, true)
+    backend === :nccs && return (NEXGDDP_NCCS_BASE, false)
+    throw(ArgumentError("Unknown NEX-GDDP backend $(repr(backend)); " *
+                        "choose from $(NEXGDDP_BACKENDS)."))
+end
 
 "The four SSP scenarios available in NEX-GDDP-CMIP6."
 const SSP_SCENARIOS = (:ssp126, :ssp245, :ssp370, :ssp585)
@@ -93,14 +123,18 @@ _scenario_for_year(year::Integer, ssp::AbstractString) =
     year <= 2014 ? "historical" : ssp
 
 """
-    _nexgddp_url(base, model, scenario, variant, grid, nexvar, year; version = "") -> String
+    _nexgddp_url(base, model, scenario, variant, grid, nexvar, year; version = "", bytes = false) -> String
 
-Build the OPeNDAP URL for a single NEX-GDDP file. `version` allows the data-
-version suffix some files carry (e.g. `"_v1.1"`).
+Build the file URL for a single NEX-GDDP file. `version` allows the data-version
+suffix some files carry (e.g. `"_v1.1"`). `bytes = true` appends the NetCDF
+byte-range marker `#mode=bytes` (needed for the AWS S3 backend's plain-HTTP
+objects; the NCCS OPeNDAP server must not have it).
 """
-function _nexgddp_url(base, model, scenario, variant, grid, nexvar, year; version = "")
+function _nexgddp_url(base, model, scenario, variant, grid, nexvar, year;
+                      version = "", bytes = false)
     fname = "$(nexvar)_day_$(model)_$(scenario)_$(variant)_$(grid)_$(year)$(version).nc"
-    return "$(base)/$(model)/$(scenario)/$(variant)/$(nexvar)/$(fname)"
+    url = "$(base)/$(model)/$(scenario)/$(variant)/$(nexvar)/$(fname)"
+    return bytes ? url * "#mode=bytes" : url
 end
 
 # Full span of the NEX-GDDP-CMIP6 archive (historical 1950–2014 + SSP 2015–2100).
@@ -122,6 +156,9 @@ Keyword arguments
 - `scenario` : one of `$(SSP_SCENARIOS)`.
 - `model`    : a NEX-GDDP model name (see [`NEXGDDP_MODELS`](@ref)).
 - `variant` / `grid` : override the realisation/grid labels if needed.
+- `backend`  : `:aws` (keyless S3 Open Data mirror, default) or `:nccs` (NASA
+  NCCS OPeNDAP). The data is identical, so a cell cached from one backend is
+  reused by the other.
 - `start` / `stop`   : date range (default 1950-01-01 … 2100-12-31).
 - `vars`     : variables to fetch (default all of `$(keys(NEXGDDP_VARMAP))`).
 
@@ -188,6 +225,8 @@ function climate_ssp(place::AbstractString;
                      correct::Bool = true,
                      method::Symbol = :qdm,
                      ref::Tuple{Date,Date} = DEFAULT_REF,
+                     source::Symbol = :power,
+                     backend::Symbol = NEXGDDP_DEFAULT_BACKEND,
                      hist_start::Date = Date(1950, 1, 1),
                      hist_stop::Date = default_stop(),
                      proj_start::Date = Date(1950, 1, 1),
@@ -195,7 +234,7 @@ function climate_ssp(place::AbstractString;
                      vars = index === nothing ? (var,) : keys(NEXGDDP_VARMAP),
                      band::Bool = true)
     loc  = geocode(place)
-    hist = era5_daily(loc; start = hist_start, stop = hist_stop)
+    hist = history_daily(loc; source = source, start = hist_start, stop = hist_stop)
     indexfn = index === nothing ? (d -> days_above(d, threshold; var = var)) : index
     hist_idx = indexfn(hist)
     vc = _default_valuecol(hist_idx)
@@ -209,7 +248,7 @@ function climate_ssp(place::AbstractString;
 
     fig, ax = _figure_with_history(hist_idx, vc; title = title, ylabel = ylabel)
     for (k, scen) in enumerate(scenarios)
-        ens = ssp_ensemble(loc; scenario = scen, models = models,
+        ens = ssp_ensemble(loc; scenario = scen, models = models, backend = backend,
                            start = proj_start, stop = proj_stop, vars = vars)
         correct && (ens = bias_correct(ens, hist; method = method, ref = ref))
         summary = ensemble_index(ens, indexfn; valuecol = vc)

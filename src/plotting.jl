@@ -288,9 +288,10 @@ function _day_comparison(loc::Location;
                                 method::Symbol = :qdm,
                                 bias_ref::Tuple{Date,Date} = DEFAULT_REF,
                                 forecast::Bool = true,
+                                source::Symbol = :power,
                                 hist_start::Date = Date(1981, 1, 1))
     doy  = Dates.dayofyear(date)
-    hist = era5_daily(loc; start = hist_start, stop = default_stop())
+    hist = history_daily(loc; source = source, start = hist_start, stop = default_stop())
 
     bars = NamedTuple[]
     if forecast && !offline_mode()
@@ -382,6 +383,7 @@ climate_monthly(loc::Location; offline::Bool = offline_mode(), kwargs...) =
 
 function _monthly(loc::Location;
                          var::Symbol = :tmean,
+                         source::Symbol = :power,
                          hist_start::Date = Date(1981, 1, 1),
                          hist_stop::Date = default_stop(),
                          future = ((2041, 2050),),
@@ -390,7 +392,7 @@ function _monthly(loc::Location;
                          method::Symbol = :qdm,
                          bias_ref::Tuple{Date,Date} = DEFAULT_REF,
                          lo::Real = 0.1, hi::Real = 0.9)
-    hist = era5_daily(loc; start = hist_start, stop = hist_stop)
+    hist = history_daily(loc; source = source, start = hist_start, stop = hist_stop)
     mm   = monthly_means(hist; var = var)
 
     years     = sort(unique(mm.year))
@@ -499,6 +501,7 @@ function _daily(loc::Location;
                        window::Integer = 3,
                        ref::Tuple{Integer,Integer} = (1981, 2010),
                        future = ((2041, 2050),),
+                       source::Symbol = :power,
                        hist_start::Date = Date(1981, 1, 1),
                        hist_stop::Date = default_stop(),
                        spaghetti::Bool = false,
@@ -508,7 +511,7 @@ function _daily(loc::Location;
                        method::Symbol = :qdm,
                        bias_ref::Tuple{Date,Date} = DEFAULT_REF,
                        lo::Real = 0.025, hi::Real = 0.975)
-    hist = era5_daily(loc; start = hist_start, stop = hist_stop)
+    hist = history_daily(loc; source = source, start = hist_start, stop = hist_stop)
     df   = hist.table
     yr   = Dates.year.(df.date)
 
