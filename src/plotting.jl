@@ -600,16 +600,17 @@ function _daily(loc::Location;
                color = col, linewidth = 1.2, label = lbl)
     end
 
-    # Marker + label at the current year's latest observation (Climate-Pulse style).
+    # Marker at the current year's latest observation, with its date/value label
+    # pinned to the top-right corner (axis-relative) so it never overlaps the data.
     dthis = df[yr .== this_year, :]
     valid = findall(!ismissing, dthis[!, var])
     if !isempty(valid)
         k  = last(valid)
         mx = Dates.dayofyear(dthis.date[k]); my = Float64(dthis[k, var])
         scatter!(ax, [mx], [my]; color = CP_YEARS[end], markersize = 9)
-        text!(ax, mx, my; text = @sprintf("%s  %.2f°C",
+        text!(ax, 0.99, 0.99; text = @sprintf("%s  %.2f°C",
               Dates.format(dthis.date[k], "dd u yyyy"), my),
-              align = (:left, :bottom), offset = (8, 4),
+              space = :relative, align = (:right, :top), offset = (-6, -6),
               color = CP_YEARS[end], fontsize = 13)
     end
 
