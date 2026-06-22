@@ -12,6 +12,20 @@ const _PALETTE = [:steelblue, :firebrick, :seagreen, :darkorange,
 _color(i::Integer) = _PALETTE[mod1(i, length(_PALETTE))]
 _tocolor(c) = c isa Integer ? _color(c) : c
 
+# Climate-Pulse (Copernicus C3S) inspired palette for the seasonal-cycle figures:
+# the most recent years pop in warm tones over a light-grey "spaghetti" of every
+# year, with the climatological mean as a dashed grey line and the future
+# projection band in a muted magenta.
+const CP_SPAGHETTI = "#d6d6d6"   # every historical year (faint background)
+const CP_AVERAGE   = "#555555"   # climatological mean (dashed)
+const CP_FUTURE    = "#9c4a86"   # future projection band (pastel dark magenta)
+# Accent for the most recent years, current year last: gold → coral → burgundy.
+const CP_YEARS = ("#e0a23c", "#e0503a", "#7d2a35")
+
+# Colours for the `n` most recent years (oldest → newest), taken from the end of
+# CP_YEARS so the current year is always burgundy. `n` is clamped to what we have.
+_recent_year_colors(n::Integer) = CP_YEARS[(length(CP_YEARS) - min(n, length(CP_YEARS)) + 1):end]
+
 # Makie renders `NaN` as a gap; map `missing` to `NaN` so any value column plots.
 _tofloatvec(y) = Float64[ismissing(v) ? NaN : Float64(v) for v in y]
 
@@ -299,14 +313,14 @@ function _day_comparison(loc::Location;
         r  = fc.table[fc.table.date .== date, :]
         nrow(r) == 1 && push!(bars,
             (label = "today", lo = r.tmin[1], mid = r.tmean[1], hi = r.tmax[1],
-             color = :black))
+             color = CP_YEARS[end]))
     end
     rb = _day_bar(hist, doy; window = window, period = ref)
     push!(bars, (label = "$(ref[1])–$(ref[2])", lo = rb.lo, mid = rb.mid,
-                 hi = rb.hi, color = :gray60))
+                 hi = rb.hi, color = "#9aa0a6"))
     cb = _day_bar(hist, doy; window = window, period = recent)
     push!(bars, (label = "$(recent[1])–$(recent[2])", lo = cb.lo, mid = cb.mid,
-                 hi = cb.hi, color = _color(1)))
+                 hi = cb.hi, color = CP_YEARS[2]))
 
     ens = _future_ensemble(loc, hist; models = models, correct = correct,
                            method = method, bias_ref = bias_ref, future = future,
@@ -315,7 +329,7 @@ function _day_comparison(loc::Location;
         for (i, per) in enumerate(future)
             fb = _day_bar(ens, doy; window = window, period = per)
             push!(bars, (label = "$(per[1])–$(per[2])", lo = fb.lo, mid = fb.mid,
-                         hi = fb.hi, color = _color(i + 2)))
+                         hi = fb.hi, color = CP_FUTURE))
         end
     end
 
@@ -386,6 +400,8 @@ function _monthly(loc::Location;
                          source::Symbol = :power,
                          hist_start::Date = Date(1981, 1, 1),
                          hist_stop::Date = default_stop(),
+                         ref::Tuple{Integer,Integer} = (1991, 2020),
+                         recent_years::Integer = 3,
                          future = ((2041, 2050),),
                          models = PROJECTION_MODELS,
                          correct::Bool = true,
@@ -397,36 +413,52 @@ function _monthly(loc::Location;
 
     years     = sort(unique(mm.year))
     this_year = maximum(years)
-    last_year = this_year - 1
 
     fig = Figure()
     ax = Axis(fig[1, 1]; xlabel = "month", ylabel = "mean temperature (°C)",
         title = @sprintf("%s — seasonal cycle of %s", _place_label(loc), string(var)),
         xticks = (1:12, _MONTH_ABBR))
 
+    recent = years[max(1, end - recent_years + 1):end]
+
+    # Every year as a faint grey line (the "spaghetti" backdrop), recent ones drawn
+    # on top below.
     for y in years
-        (y == this_year || y == last_year) && continue
+        y in recent && continue
         d = mm[mm.year .== y, :]
-        lines!(ax, d.month, _tofloatvec(d.mean); color = (:gray, 0.25), linewidth = 0.7)
+        lines!(ax, d.month, _tofloatvec(d.mean); color = CP_SPAGHETTI, linewidth = 0.6)
+    end
+
+    # Climatological mean over the reference period, as a dashed grey line.
+    refmask = (mm.year .>= ref[1]) .& (mm.year .<= ref[2])
+    if any(refmask)
+        avg = combine(groupby(mm[refmask, :], :month),
+                      :mean => (x -> mean(skipmissing(x))) => :mean)
+        sort!(avg, :month)
+        lines!(ax, avg.month, _tofloatvec(avg.mean); color = CP_AVERAGE,
+               linewidth = 1.4, linestyle = :dash,
+               label = @sprintf("%d–%d average", ref[1], ref[2]))
     end
 
     ens = _future_ensemble(loc, hist; models = models, correct = correct,
                            method = method, bias_ref = bias_ref, future = future,
                            start = hist_start)
     if ens !== nothing
-        for (i, per) in enumerate(future)
+        for per in future
             b = _monthly_band(ens, per; var = var, lo = lo, hi = hi)
             band!(ax, b.month, _tofloatvec(b.lo), _tofloatvec(b.hi);
-                  color = (_color(i + 2), 0.35), label = "$(per[1])–$(per[2])")
+                  color = (CP_FUTURE, 0.30), label = "$(per[1])–$(per[2])")
         end
     end
 
-    for (y, col, lbl) in ((last_year, _color(1), string(last_year)),
-                          (this_year, _color(2), "$(this_year) (so far)"))
+    # The most recent years in warm accents (current year burgundy, on top).
+    cols = _recent_year_colors(length(recent))
+    for (y, col) in zip(recent, cols)
         d = mm[mm.year .== y, :]
         nrow(d) == 0 && continue
+        lbl = y == this_year ? "$(y) (so far)" : string(y)
         scatterlines!(ax, d.month, _tofloatvec(d.mean); color = col,
-                      linewidth = 2.5, markersize = 7, label = lbl)
+                      linewidth = 1.4, markersize = 5, label = lbl)
     end
     axislegend(ax; position = :lt, framevisible = false)
     return fig
@@ -465,16 +497,19 @@ end
     climate_daily(place; var = :tmean, window = 3, ref, future, spaghetti = false, ...) -> Figure
 
 Daily-resolution companion to [`climate_monthly`](@ref): the seasonal cycle of
-daily `var` across the year (day-of-year axis). Drawn back-to-front:
+daily `var` across the year (day-of-year axis), styled after the Copernicus
+Climate Pulse charts. Drawn back-to-front:
 
-- a light band for the `ref` period's central **95 %** interval (`lo`…`hi`
-  quantiles per day-of-year, smoothed over a `±window`-day window),
-- a darker band per `future` period from the bias-corrected CMIP6 ensemble
+- with `spaghetti = true` (the default), every available year as a faint
+  light-grey line — the "spaghetti" backdrop,
+- a magenta band per `future` period from the bias-corrected CMIP6 ensemble
   (omitted if no projection data is available),
-- with `spaghetti = true`, every available year as a faint grey line,
-- the most recent complete year and the current (partial) year as darker lines,
-- and, when `forecast = true`, the live forecast as a `tmin`–`tmax` band with a
-  mean line in its own shade.
+- the `ref`-period climatological mean as a dashed grey line (1991–2020 by
+  default, smoothed over a `±window`-day window),
+- the `recent_years` most recent years as warm accent lines (gold → coral →
+  burgundy, current year last), with a marker and label at the current year's
+  latest value,
+- and, when `forecast = true`, the live forecast mean line.
 
 Pass `offline = true` (or set the `CLIMSTATS_OFFLINE` environment variable) to
 plot only from cached data without any network access; the live forecast is
@@ -499,12 +534,13 @@ climate_daily(loc::Location; offline::Bool = offline_mode(), kwargs...) =
 function _daily(loc::Location;
                        var::Symbol = :tmean,
                        window::Integer = 3,
-                       ref::Tuple{Integer,Integer} = (1981, 2010),
+                       ref::Tuple{Integer,Integer} = (1991, 2020),
+                       recent_years::Integer = 3,
                        future = ((2041, 2050),),
                        source::Symbol = :power,
                        hist_start::Date = Date(1981, 1, 1),
                        hist_stop::Date = default_stop(),
-                       spaghetti::Bool = false,
+                       spaghetti::Bool = true,
                        forecast::Bool = true,
                        models = PROJECTION_MODELS,
                        correct::Bool = true,
@@ -517,54 +553,72 @@ function _daily(loc::Location;
 
     years     = sort(unique(yr))
     this_year = maximum(years)
-    last_year = this_year - 1
 
     fig = Figure()
     ax = Axis(fig[1, 1]; xlabel = "month", ylabel = "$(string(var)) (°C)",
         title = @sprintf("%s — daily %s", _place_label(loc), string(var)),
         xticks = (_MONTH_STARTS, _MONTH_ABBR))
 
-    hb = _daily_band([hist], ref; var = var, window = window, lo = lo, hi = hi)
-    band!(ax, hb.doy, _tofloatvec(hb.lo), _tofloatvec(hb.hi);
-          color = (:gray, 0.25),
-          label = @sprintf("%d–%d 95%%", ref[1], ref[2]))
+    recent = years[max(1, end - recent_years + 1):end]
 
+    # Every year as a faint grey line — the Climate-Pulse "spaghetti" backdrop.
+    if spaghetti
+        for y in years
+            y in recent && continue
+            d = df[yr .== y, :]
+            lines!(ax, Dates.dayofyear.(d.date), _tofloatvec(d[!, var]);
+                   color = CP_SPAGHETTI, linewidth = 0.5)
+        end
+    end
+
+    # Future projection band(s) in muted magenta.
     ens = _future_ensemble(loc, hist; models = models, correct = correct,
                            method = method, bias_ref = bias_ref, future = future,
                            start = hist_start)
     if ens !== nothing
-        for (i, per) in enumerate(future)
+        for per in future
             fb = _daily_band(ens.members, per; var = var, window = window,
                              lo = lo, hi = hi)
             band!(ax, fb.doy, _tofloatvec(fb.lo), _tofloatvec(fb.hi);
-                  color = (_color(i + 2), 0.35), label = "$(per[1])–$(per[2])")
+                  color = (CP_FUTURE, 0.28), label = "$(per[1])–$(per[2])")
         end
     end
 
-    if spaghetti
-        for y in years
-            (y == this_year || y == last_year) && continue
-            d = df[yr .== y, :]
-            lines!(ax, Dates.dayofyear.(d.date), _tofloatvec(d[!, var]);
-                   color = (:gray, 0.20), linewidth = 0.5)
-        end
-    end
+    # Climatological mean over the reference period, as a dashed grey line.
+    ab = _daily_band([hist], ref; var = var, window = window, lo = 0.5, hi = 0.5)
+    lines!(ax, ab.doy, _tofloatvec(ab.median); color = CP_AVERAGE,
+           linewidth = 1.4, linestyle = :dash,
+           label = @sprintf("%d–%d average", ref[1], ref[2]))
 
-    for (y, col, lbl) in ((last_year, _color(1), string(last_year)),
-                          (this_year, _color(2), "$(this_year) (so far)"))
+    # The most recent years in warm accents (current year burgundy, on top).
+    cols = _recent_year_colors(length(recent))
+    for (y, col) in zip(recent, cols)
         d = df[yr .== y, :]
         nrow(d) == 0 && continue
+        lbl = y == this_year ? "$(y) (so far)" : string(y)
         lines!(ax, Dates.dayofyear.(d.date), _tofloatvec(d[!, var]);
-               color = col, linewidth = 2, label = lbl)
+               color = col, linewidth = 1.2, label = lbl)
+    end
+
+    # Marker + label at the current year's latest observation (Climate-Pulse style).
+    dthis = df[yr .== this_year, :]
+    valid = findall(!ismissing, dthis[!, var])
+    if !isempty(valid)
+        k  = last(valid)
+        mx = Dates.dayofyear(dthis.date[k]); my = Float64(dthis[k, var])
+        scatter!(ax, [mx], [my]; color = CP_YEARS[end], markersize = 9)
+        text!(ax, mx, my; text = @sprintf("%s  %.2f°C",
+              Dates.format(dthis.date[k], "dd u yyyy"), my),
+              align = (:left, :bottom), offset = (8, 4),
+              color = CP_YEARS[end], fontsize = 13)
     end
 
     if forecast && !offline_mode()
         fc = forecast_daily(loc).table
         x  = Dates.dayofyear.(fc.date)
-        band!(ax, x, _tofloatvec(fc.tmin), _tofloatvec(fc.tmax); color = (:black, 0.18))
-        lines!(ax, x, _tofloatvec(fc.tmean); color = :black, linewidth = 2.5,
+        band!(ax, x, _tofloatvec(fc.tmin), _tofloatvec(fc.tmax); color = (:black, 0.15))
+        lines!(ax, x, _tofloatvec(fc.tmean); color = :black, linewidth = 1.2,
                label = "forecast")
-        scatter!(ax, x, _tofloatvec(fc.tmean); color = :black, markersize = 6)
     end
 
     axislegend(ax; position = :lt, framevisible = false)
