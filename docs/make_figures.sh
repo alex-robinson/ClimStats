@@ -1,39 +1,30 @@
 #!/usr/bin/env bash
-# Regenerate the committed documentation figures from the (general) example
-# scripts, pinned to one location (Berlin), and copy them under docs/src/assets/
-# where the documentation pages reference them. The example scripts themselves
-# take the place as an argument; this wrapper is just the docs-specific pinning.
+# Regenerate the committed documentation figures.
 #
 #     bash docs/make_figures.sh
 #
-# Needs internet access (Open-Meteo). The hot-days and SSP tours live in the
-# README, not the docs site, so they are not regenerated here (SSP also needs the
-# NetCDF stack and reachable NASA NCCS).
+# The per-location climatology figures and their pages are produced by
+# docs/make_locations.jl (offline, from the bundled fixture cache — see
+# docs/locations.jl). This wrapper runs that, then renders the one remaining
+# figure the locations script does not cover: the current-year nowcast, pinned
+# to Berlin and embedded on the nowcast page. The hot-days and SSP tours live in
+# the README, not the docs site, so they are not regenerated here.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-PLACE="Berlin, Germany"
-SLUG="berlin_germany"
 ASSETS="docs/src/assets"
 mkdir -p "$ASSETS"
 
-julia --project=. examples/climatology.jl "$PLACE"
-julia --project=. examples/nowcast.jl     "$PLACE"
+# Climatology figures + per-location pages (offline; no network/quota).
+julia --project=docs docs/make_locations.jl
 
-copy() {  # copy <example-name> <asset-name>
-    local src="examples/${SLUG}_$1.png"
-    if [ -f "$src" ]; then
-        cp "$src" "$ASSETS/$2" && echo "copied $src -> $ASSETS/$2"
-    else
-        echo "WARNING: $src not produced (skipped)"
-    fi
-}
-
-# Climatology figures keep their (slugged) names; the nowcast figure is embedded
-# under a stable name on the nowcast page.
-copy today_vs_climate    berlin_germany_today_vs_climate.png
-copy monthly_climatology berlin_germany_monthly_climatology.png
-copy daily_climatology   berlin_germany_daily_climatology.png
-copy nowcast             berlin_hot_days_nowcast.png
+# Nowcast figure (Berlin), under a stable name on the nowcast page.
+julia --project=. examples/nowcast.jl "Berlin, Germany"
+src="examples/berlin_germany_nowcast.png"
+if [ -f "$src" ]; then
+    cp "$src" "$ASSETS/berlin_hot_days_nowcast.png" && echo "copied $src"
+else
+    echo "WARNING: $src not produced (skipped)"
+fi
 
 echo "Done. Figures in $ASSETS"

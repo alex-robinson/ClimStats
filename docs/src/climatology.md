@@ -33,7 +33,7 @@ using ClimStats, CairoMakie
 fig = climate_day_comparison("Berlin, Germany")
 ```
 
-![Berlin: today vs. day-of-year climatology](assets/berlin_germany_today_vs_climate.png)
+![Berlin: today vs. day-of-year climatology](assets/berlin_germany/today_vs_climate.png)
 
 ### Monthly seasonal cycle
 
@@ -45,7 +45,7 @@ most recent complete year and the current (partial) year, and shades the
 fig = climate_monthly("Berlin, Germany")
 ```
 
-![Berlin: monthly seasonal cycle](assets/berlin_germany_monthly_climatology.png)
+![Berlin: monthly seasonal cycle](assets/berlin_germany/monthly_climatology.png)
 
 ### Daily seasonal cycle
 
@@ -58,7 +58,7 @@ overlay every year individually.
 fig = climate_daily("Berlin, Germany"; spaghetti = true)
 ```
 
-![Berlin: daily seasonal cycle](assets/berlin_germany_daily_climatology.png)
+![Berlin: daily seasonal cycle](assets/berlin_germany/daily_climatology.png)
 
 ## Offline rendering
 

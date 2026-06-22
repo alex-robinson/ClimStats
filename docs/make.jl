@@ -1,6 +1,8 @@
 using Documenter
 using ClimStats
 
+include("locations.jl")
+
 makedocs(;
     modules = [ClimStats],
     sitename = "ClimStats",
@@ -15,12 +17,7 @@ makedocs(;
         "Caching" => "caching.md",
         "Climatology" => "climatology.md",
         "Current-year nowcast" => "nowcast.md",
-        "Locations" => [
-            "Berlin, Germany"        => "cities/berlin.md",
-            "Madrid, Spain"          => "cities/madrid.md",
-            "Athens, Greece"         => "cities/athens.md",
-            "Fort Collins, Colorado" => "cities/fort_collins.md",
-        ],
+        "Locations" => [loc.place => "cities/$(loc.slug).md" for loc in DOC_LOCATIONS],
     ],
     # These docs are scoped to the nowcast, so docstrings here cross-reference
     # core symbols (ClimateData, …) that aren't documented on a page; let those
