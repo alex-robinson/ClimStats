@@ -18,7 +18,7 @@ _tocolor(c) = c isa Integer ? _color(c) : c
 # projection band in a muted magenta.
 const CP_SPAGHETTI = "#d6d6d6"   # every historical year (faint background)
 const CP_AVERAGE   = "#555555"   # climatological mean (dashed)
-const CP_FUTURE    = "#9c4a86"   # future projection band (pastel dark magenta)
+const CP_FUTURE    = "#b22222"   # future projection band (dark red, drawn very translucent)
 # Accent for the most recent years, current year last: gold → coral → burgundy.
 const CP_YEARS = ("#e0a23c", "#e0503a", "#7d2a35")
 
@@ -447,7 +447,9 @@ function _monthly(loc::Location;
         for per in future
             b = _monthly_band(ens, per; var = var, lo = lo, hi = hi)
             band!(ax, b.month, _tofloatvec(b.lo), _tofloatvec(b.hi);
-                  color = (CP_FUTURE, 0.30), label = "$(per[1])–$(per[2])")
+                  color = (CP_FUTURE, 0.10), label = "$(per[1])–$(per[2])")
+            lines!(ax, b.month, _tofloatvec(b.lo); color = (CP_FUTURE, 0.20), linewidth = 0.8)
+            lines!(ax, b.month, _tofloatvec(b.hi); color = (CP_FUTURE, 0.20), linewidth = 0.8)
         end
     end
 
@@ -580,7 +582,9 @@ function _daily(loc::Location;
             fb = _daily_band(ens.members, per; var = var, window = window,
                              lo = lo, hi = hi)
             band!(ax, fb.doy, _tofloatvec(fb.lo), _tofloatvec(fb.hi);
-                  color = (CP_FUTURE, 0.28), label = "$(per[1])–$(per[2])")
+                  color = (CP_FUTURE, 0.10), label = "$(per[1])–$(per[2])")
+            lines!(ax, fb.doy, _tofloatvec(fb.lo); color = (CP_FUTURE, 0.20), linewidth = 0.8)
+            lines!(ax, fb.doy, _tofloatvec(fb.hi); color = (CP_FUTURE, 0.20), linewidth = 0.8)
         end
     end
 
