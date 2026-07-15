@@ -1,0 +1,8 @@
+lat = 38.0
+lon = 23.75
+model = "MPI_ESM1_2_XR"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "0a9f3428488c04cd02e13d12a3f8e54bed0adaaf477e8b75d1a45de79cf314e9"
+schema = 1
