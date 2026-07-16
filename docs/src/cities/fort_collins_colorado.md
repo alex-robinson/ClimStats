@@ -5,9 +5,9 @@ Temperature climatology for **Fort Collins, Colorado** — from [`climate_day_co
 !!! note "Partial CMIP6 ensemble"
     The 2041–2050 band uses **5 of 6** projection models cached for this location; its spread will widen once the rest are fetched.
 
-![Fort Collins, Colorado: today vs. day-of-year climatology](../assets/fort_collins_colorado/today_vs_climate.png)
+![Fort Collins, Colorado: daily seasonal cycle](../assets/fort_collins_colorado/daily_climatology.png)
 
 ![Fort Collins, Colorado: monthly seasonal cycle](../assets/fort_collins_colorado/monthly_climatology.png)
 
-![Fort Collins, Colorado: daily seasonal cycle](../assets/fort_collins_colorado/daily_climatology.png)
+![Fort Collins, Colorado: today vs. day-of-year climatology](../assets/fort_collins_colorado/today_vs_climate.png)
 

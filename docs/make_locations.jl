@@ -22,10 +22,12 @@ const ASSETS = joinpath(@__DIR__, "src", "assets")
 const PAGES  = joinpath(@__DIR__, "src", "cities")
 
 # (figure basename, builder given place+models, caption) for the three figures.
+# Ordered broad→specific as they appear on the page: the daily seasonal cycle
+# first, then the monthly cycle, then today vs. the day-of-year climatology last.
 const FIGURES = [
-    ("today_vs_climate",    (p, m) -> climate_day_comparison(p; models = m), "today vs. day-of-year climatology"),
-    ("monthly_climatology", (p, m) -> climate_monthly(p; models = m),        "monthly seasonal cycle"),
     ("daily_climatology",   (p, m) -> climate_daily(p; models = m),          "daily seasonal cycle"),
+    ("monthly_climatology", (p, m) -> climate_monthly(p; models = m),        "monthly seasonal cycle"),
+    ("today_vs_climate",    (p, m) -> climate_day_comparison(p; models = m), "today vs. day-of-year climatology"),
 ]
 
 # Projection models with a cached series for `place` (probed offline; an uncached
