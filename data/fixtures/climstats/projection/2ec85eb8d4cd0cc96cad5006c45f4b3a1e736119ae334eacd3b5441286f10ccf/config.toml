@@ -1,0 +1,8 @@
+lat = 40.5
+lon = -105.0
+model = "FGOALS_f3_H"
+
+[_META]
+cachetype = "climstats/projection"
+hash = "2ec85eb8d4cd0cc96cad5006c45f4b3a1e736119ae334eacd3b5441286f10ccf"
+schema = 1

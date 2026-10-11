@@ -1,0 +1,8 @@
+lat = 52.5
+lon = 13.125
+through = "2026-09-30"
+
+[_META]
+cachetype = "climstats/power"
+hash = "72111eadc395596ceeadf644c18088d2b0f26f841146005427f575d7250ac142"
+schema = 1
